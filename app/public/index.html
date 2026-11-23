@@ -288,12 +288,13 @@ function toast(msg, err) { const t = $('#toast'); t.textContent = msg; t.classNa
 // ---------- what's already in the library ----------
 const nkey = (artist, title) => normT(String(artist || '').split(/,|&| feat\.? | ft\.? /i)[0]) + '|' + normT(title);
 function normT(x) { return String(x || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/\(.*?\)|\[.*?\]/g, '').replace(/ - .*(remaster|version|edition|deluxe|live|mix).*$/i, '').replace(/[^a-z0-9]/g, ''); }
-let libAlbums = new Set(), libTracks = new Set();
+let libAlbums = new Set(), libTracks = new Set(), libTrackMap = new Map();
 async function loadLibIndex(fresh) {
   try {
     const r = await api('/api/library/index' + (fresh ? '?fresh=1' : ''));
     libAlbums = new Set(r.albums.map(([a, t]) => nkey(a, t)));
     libTracks = new Set(r.tracks.map(([a, t]) => nkey(a, t)));
+    libTrackMap = new Map(r.tracks.filter((x) => x[2]).map(([a, t, id, album, img, dur]) => [nkey(a, t), { id, album, imageId: img, duration: dur }]));
     refreshDlButtons();
   } catch {}
 }
@@ -341,6 +342,8 @@ async function pollQueue(force) {
 }
 
 // ---------- player ----------
+const PREVIEW_SECS = 30;
+let previewMode = false;
 let queue = [], qi = -1, origQueue = null, shuffle = false, repeat = 'off'; // repeat: off | all | one
 try { shuffle = localStorage.tfShuf === '1'; if (['off', 'all', 'one'].includes(localStorage.tfRep)) repeat = localStorage.tfRep; } catch {}
 function shuffled(list, keep) {
@@ -369,9 +372,17 @@ function nextTrack(auto) {
 }
 function loadCurrent() {
   const t = queue[qi]; if (!t) return;
-  audio.src = t.src === 'tidal' ? `/api/tidal/stream/${t.id}` : `/api/library/stream/${t.id}`;
+  // Tidal song you already own -> play your local file. Not owned -> 30-second preview.
+  previewMode = false;
+  let src = t.src === 'tidal' ? `/api/tidal/stream/${t.id}` : `/api/library/stream/${t.id}`;
+  if (t.src === 'tidal') {
+    const local = libTrackMap.get(nkey(t.artist, t.title));
+    if (local) src = `/api/library/stream/${local.id}`;
+    else previewMode = true;
+  }
+  audio.src = src;
   audio.play().catch(() => {});
-  $('#np-t').innerHTML = esc(t.title) + (t.src === 'tidal' ? '<span class="src">TIDAL</span>' : '');
+  $('#np-t').innerHTML = esc(t.title) + (t.src === 'tidal' ? `<span class="src">${previewMode ? 'PREVIEW' : 'LOCAL'}</span>` : '');
   $('#np-a').textContent = [t.artist, t.album].filter(Boolean).join(' — ');
   $('#np-th').style.backgroundImage = t.src === 'tidal' ? bg(t.cover) : jfImg(t.imageId, 120);
   if ('mediaSession' in navigator) {
@@ -402,13 +413,15 @@ audio.onplay = audio.onpause = () => { setPP(); markPlaying(); };
 audio.onended = () => nextTrack(true);
 audio.onerror = () => { const t = queue[qi]; if (t) toast(t.src === 'tidal' ? 'Tidal playback failed — you can still download it' : 'Could not play this file', true); };
 audio.ontimeupdate = () => {
-  const c = fmt(audio.currentTime), d = fmt(audio.duration);
+  if (previewMode && audio.currentTime >= PREVIEW_SECS) { audio.pause(); nextTrack(true); return; }
+  const dur = previewMode ? Math.min(PREVIEW_SECS, audio.duration || PREVIEW_SECS) : audio.duration;
+  const c = fmt(audio.currentTime), d = fmt(dur);
   $('#cur').textContent = c; $('#dur').textContent = d; $('#fs-cur').textContent = c; $('#fs-dur').textContent = d;
-  if (!seeking && audio.duration) { const v = audio.currentTime / audio.duration * 1000; $('#seek').value = v; $('#fs-seek').value = v; }
+  if (!seeking && dur) { const v = audio.currentTime / dur * 1000; $('#seek').value = v; $('#fs-seek').value = v; }
 };
 let seeking = false;
 $('#seek').oninput = () => seeking = true;
-$('#seek').onchange = (e) => { if (audio.duration) audio.currentTime = e.target.value / 1000 * audio.duration; seeking = false; };
+$('#seek').onchange = (e) => { const dur = previewMode ? Math.min(PREVIEW_SECS, audio.duration || PREVIEW_SECS) : audio.duration; if (dur) audio.currentTime = e.target.value / 1000 * dur; seeking = false; };
 $('#fs-seek').oninput = () => seeking = true;
 $('#fs-seek').onchange = $('#seek').onchange;
 
@@ -475,7 +488,7 @@ function renderFs() {
   $('#fs-a').textContent = t.artist || '';
   $('#fs-alb').textContent = t.album || '';
   $('#fs-alb').style.display = t.album && t.albumId ? '' : (t.album ? '' : 'none');
-  $('#fs-from').textContent = t.src === 'tidal' ? 'Playing from Tidal' : 'Playing from your library';
+  $('#fs-from').textContent = t.src === 'tidal' ? (previewMode ? '30-second Tidal preview' : 'Playing your local copy') : 'Playing from your library';
   const dl = $('#fs-dl');
   if (t.src === 'tidal') { dl.hidden = false; dl.dataset.dl = t.id; dl.className = dlClass(t.id); dl.innerHTML = dlIcon(t.id); dl.onclick = () => download('track', t.id, t.title, t.artist); }
   else dl.hidden = true;

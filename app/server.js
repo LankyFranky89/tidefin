@@ -387,12 +387,12 @@ const server = http.createServer(async (req, res) => {
       if (!libIndexCache || Date.now() - libIndexCache.at > 60000 || q.get('fresh')) {
         const [al, tr] = await Promise.all([
           jf('/Items?IncludeItemTypes=MusicAlbum&Recursive=true&Fields=AlbumArtist&EnableImages=false&Limit=20000'),
-          jf('/Items?IncludeItemTypes=Audio&Recursive=true&Fields=AlbumArtist&EnableImages=false&Limit=50000'),
+          jf('/Items?IncludeItemTypes=Audio&Recursive=true&Fields=AlbumArtist&Limit=50000'),
         ]);
         libIndexCache = {
           at: Date.now(),
           albums: (al.Items || []).map((i) => [i.AlbumArtist || (i.Artists || [])[0] || '', i.Name]),
-          tracks: (tr.Items || []).map((i) => [(i.Artists || [])[0] || i.AlbumArtist || '', i.Name]),
+          tracks: (tr.Items || []).map((i) => [(i.Artists || [])[0] || i.AlbumArtist || '', i.Name, i.Id, i.Album || '', (i.ImageTags && i.ImageTags.Primary) ? i.Id : (i.AlbumPrimaryImageTag ? i.AlbumId : null), i.RunTimeTicks ? Math.round(i.RunTimeTicks / 1e7) : null]),
         };
       }
       return send(res, 200, { albums: libIndexCache.albums, tracks: libIndexCache.tracks });
