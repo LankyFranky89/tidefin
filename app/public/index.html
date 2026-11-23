@@ -752,9 +752,24 @@ function openFs() {
 function closeFs(fromPop) {
   if (!fs.classList.contains('open')) return;
   fs.classList.remove('open'); fs.setAttribute('aria-hidden', 'true'); fs.style.transform = '';
-  if (!fromPop && history.state && history.state.tfFs) history.back();
+  if (!fromPop && history.state && history.state.tfFs) { ignorePop = true; history.back(); }
 }
-window.addEventListener('popstate', () => closeFs(true));
+// ---------- Back button / back gesture: one step at a time ----------
+let ignorePop = false;
+window.addEventListener('popstate', (e) => {
+  if (ignorePop) { ignorePop = false; return; }
+  const modal = document.querySelector('.modal-bg'), menu = document.querySelector('.menu');
+  if (modal || menu) {                       // close the dialog/menu, stay on the page
+    if (modal) { const c = modal.querySelector('[data-c="0"], #dcancel'); c ? c.click() : modal.remove(); }
+    closeMenu();
+    history.pushState({ tf: 1, v: view }, '');
+    return;
+  }
+  if (fs.classList.contains('open')) { closeFs(true); return; }
+  const st = e.state;
+  if (st && st.v) go(st.v.name, st.v, false, true);
+  else go('home', {}, false, true);
+});
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFs(); });
 $('.np').addEventListener('click', (e) => { if (swiped) { swiped = false; return; } openFs(); });
 let swX = null, swY = 0, swiped = false;
@@ -933,9 +948,16 @@ function bindCards(el, list, src) {
 }
 
 let view = { name: 'library' }, history_ = [];
-function go(name, args = {}, push = true) {
-  if (push) history_.push(view);
+function go(name, args = {}, push = true, fromPop = false) {
+  const prevName = view && view.name;
+  if (fromPop) history_.pop(); else if (push) history_.push(view);
   view = { name, ...args };
+  if (!fromPop) {
+    const st = { tf: 1, v: view };
+    if (!window.__tfNavStarted || (name === 'search' && prevName === 'search')) history.replaceState(st, ''); // typing in search: no extra steps
+    else history.pushState(st, '');
+    window.__tfNavStarted = true;
+  }
   document.documentElement.dataset.view = name;
   if (name === 'search' && document.documentElement.classList.contains('phone') && !$('#q').value) setTimeout(() => $('#q').focus(), 50);
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.v === name || (['album', 'artist', 'genre'].includes(name) && b.dataset.v === 'library') || (name === 'tidalAlbum' && b.dataset.v === 'search')));
@@ -943,7 +965,7 @@ function go(name, args = {}, push = true) {
   ({ home: renderHome, library: renderLibrary, search: renderSearch, downloads: renderDownloads, album: renderAlbum, tidalAlbum: renderTidalAlbum, artist: renderArtist, genre: renderGenre })[name]();
 }
 const backBtn = () => history_.length ? '<button class="back" id="back">← Back</button>' : '';
-const bindBack = () => { const b = $('#back'); if (b) b.onclick = () => { const v = history_.pop(); go(v.name, v, false); }; };
+const bindBack = () => { const b = $('#back'); if (b) b.onclick = () => history.back(); };
 const loading = () => main.innerHTML = '<div class="empty">Loading…</div>';
 const errBox = (e) => `<div class="empty" style="color:var(--err)">${esc(e.message)}</div>`;
 
