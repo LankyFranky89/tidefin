@@ -89,6 +89,18 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .sub{font-size:13px;color:var(--dim);margin:18px 0 10px;font-weight:600;text-transform:uppercase;letter-spacing:.8px}
 @media(max-width:760px){.hrow{grid-auto-columns:minmax(128px,140px);gap:12px}}
 
+/* ---------- ⋯ menu + confirm dialog ---------- */
+.more{width:34px;height:34px}.more svg{width:18px;height:18px}
+.menu{position:fixed;z-index:80;min-width:190px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 12px 32px #000a}
+.menu button{display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:9px 12px;border-radius:7px;font-size:14px}
+.menu button:hover{background:#ffffff12}.menu .danger{color:var(--err)}
+.menu svg{width:16px;height:16px}
+.modal-bg{position:fixed;inset:0;z-index:90;background:#000a;display:grid;place-items:center;padding:20px}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:400px;width:100%;box-shadow:0 20px 60px #000c}
+.modal h3{margin:0 0 8px;font-size:18px}.modal p{margin:0 0 18px;color:var(--dim);line-height:1.5}
+.modal .acts{justify-content:flex-end;margin:0}
+.btn.danger{background:var(--err);color:#2a0707}
+
 /* ---------- library sections ---------- */
 .ltabs{display:flex;gap:8px;margin:4px 0 6px;flex-wrap:wrap;align-items:center}
 .ltabs button{padding:8px 16px;border-radius:999px;background:var(--panel2);color:var(--dim);font-weight:600}
@@ -230,6 +242,8 @@ const I = {
   ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
   err: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 7v6m0 4v.01"/></svg>',
 };
+const IMORE = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+const ITRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
 const ICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (s) => { if (!s && s !== 0 || !isFinite(s)) return '–'; s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -478,6 +492,50 @@ if ('mediaSession' in navigator) {
 document.addEventListener('keydown', (e) => { if (e.code === 'Space' && e.target.tagName !== 'INPUT') { e.preventDefault(); $('#pp').onclick(); } });
 
 // ---------- rendering ----------
+// ---------- ⋯ menu, confirm dialog, delete ----------
+function closeMenu() { document.querySelectorAll('.menu').forEach((m) => m.remove()); }
+function openMenu(anchor, items) {
+  closeMenu();
+  const m = document.createElement('div'); m.className = 'menu';
+  m.innerHTML = items.map((it, i) => `<button data-mi="${i}" class="${it.danger ? 'danger' : ''}">${it.icon || ''}${esc(it.label)}</button>`).join('');
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  const left = Math.min(window.innerWidth - m.offsetWidth - 8, Math.max(8, r.right - m.offsetWidth));
+  const top = r.bottom + m.offsetHeight + 8 > window.innerHeight ? r.top - m.offsetHeight - 4 : r.bottom + 4;
+  m.style.left = left + 'px'; m.style.top = Math.max(8, top) + 'px';
+  m.querySelectorAll('[data-mi]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); closeMenu(); items[+b.dataset.mi].run(); });
+  setTimeout(() => document.addEventListener('click', closeMenu, { once: true }), 0);
+}
+window.addEventListener('scroll', closeMenu, true);
+function confirmBox(title, text, okLabel) {
+  return new Promise((resolve) => {
+    const bgEl = document.createElement('div'); bgEl.className = 'modal-bg';
+    bgEl.innerHTML = `<div class="modal" role="dialog" aria-modal="true"><h3>${esc(title)}</h3><p>${text}</p>
+      <div class="acts"><button class="btn sec" data-c="0">Cancel</button><button class="btn danger" data-c="1">${esc(okLabel)}</button></div></div>`;
+    const done = (v) => { bgEl.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === 'Escape') done(false); };
+    bgEl.onclick = (e) => { if (e.target === bgEl) done(false); };
+    bgEl.querySelectorAll('[data-c]').forEach((b) => b.onclick = () => done(b.dataset.c === '1'));
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(bgEl); bgEl.querySelector('[data-c="0"]').focus();
+  });
+}
+async function deleteItem(type, item, after) {
+  const what = { song: 'song', album: 'album', artist: 'artist' }[type];
+  const name = item.title || item.name;
+  const extra = type === 'album' ? ' and all its songs' : type === 'artist' ? ' and every album by them in your library' : '';
+  const ok = await confirmBox(`Delete ${what}?`, `<b style="color:var(--text)">${esc(name)}</b>${extra} will be permanently deleted from your NAS. This can't be undone.`, `Delete ${what}`);
+  if (!ok) return;
+  try {
+    const r = await api('/api/library/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, id: item.id }) });
+    toast(`Deleted ${name}${r.deleted > 1 ? ` (${r.deleted} albums)` : ''}`);
+    const cur = queue[qi];
+    if (cur && cur.src === 'jf' && type === 'song' && String(cur.id) === String(item.id)) { audio.pause(); }
+    loadLibIndex(true);
+    if (after) after();
+  } catch (e) { toast('Delete failed: ' + e.message, true); }
+}
+
 function trackRows(list, { showThumb = true, numbered = false } = {}) {
   if (!list.length) return '<div class="empty">No tracks</div>';
   markOwned(list.filter((t) => t.src === 'tidal'), 'track');
@@ -487,7 +545,7 @@ function trackRows(list, { showThumb = true, numbered = false } = {}) {
       <div class="th${showThumb ? '' : ' nothumb'}" data-play="${i}" title="Play" style="background-image:${showThumb ? (t.src === 'tidal' ? bg(t.cover) : jfImg(t.imageId, 100)) : 'none'}"><span class="pb">${I.play}</span></div>
       <div style="min-width:0"><div class="rt">${esc(t.title)}${t.explicit ? '<span class="e">E</span>' : ''}</div><div class="ra">${esc(t.artist)}${t.album ? ' — ' + esc(t.album) : ''}</div></div>
       <div class="d">${fmt(t.duration)}</div>
-      ${t.src === 'tidal' ? `<button class="${dlClass(t.id)}" data-dl="${esc(t.id)}" data-i="${i}" title="Download to library">${dlIcon(t.id)}</button>` : '<span></span>'}
+      ${t.src === 'tidal' ? `<button class="${dlClass(t.id)}" data-dl="${esc(t.id)}" data-i="${i}" title="Download to library">${dlIcon(t.id)}</button>` : `<button class="ib more" data-more="${i}" title="More">${IMORE}</button>`}
     </div>`).join('') + '</div>';
 }
 function bindRows(el, list) {
@@ -498,6 +556,14 @@ function bindRows(el, list) {
     playList(list, +b.dataset.play);
   });
   el.querySelectorAll('[data-dl][data-i]').forEach((b) => b.onclick = () => { const t = list[+b.dataset.i]; download('track', t.id, t.title, t.artist); });
+  el.querySelectorAll('[data-more]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    const i = +b.dataset.more, t = list[i];
+    const items = [];
+    if (t.albumId) items.push({ label: 'Go to album', run: () => go('album', { id: t.albumId }) });
+    items.push({ label: 'Delete song', danger: true, icon: ITRASH, run: () => deleteItem('song', t, () => { b.closest('.row').remove(); }) });
+    openMenu(b, items);
+  });
   markPlaying();
 }
 function albumCards(list, src, row = false) {
@@ -512,7 +578,7 @@ function albumCards(list, src, row = false) {
         <button class="pl" data-pla="${i}" title="Play album">${I.play}</button>
       </div>
       <div class="tt"><div><div class="t">${esc(a.title)}</div><div class="a">${esc(a.artist)}${a.year ? ' · ' + a.year : ''}${done ? ' · In library' : ''}</div></div>
-        ${src === 'tidal' ? `<button class="${dlClass(a.id)}" data-dl="${id}" data-dla="${i}" title="Download album">${dlIcon(a.id)}</button>` : ''}</div>
+        ${src === 'tidal' ? `<button class="${dlClass(a.id)}" data-dl="${id}" data-dla="${i}" title="Download album">${dlIcon(a.id)}</button>` : `<button class="ib more" data-amore="${i}" title="More">${IMORE}</button>`}</div>
     </div>`;
   }).join('') + '</div>';
 }
@@ -530,6 +596,14 @@ async function playAlbum(src, id) {
 function bindCards(el, list, src) {
   el.querySelectorAll('[data-alb]').forEach((c) => c.onclick = () => go(src === 'tidal' ? 'tidalAlbum' : 'album', { id: list[+c.dataset.alb].id }));
   el.querySelectorAll('[data-dla]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); const a = list[+b.dataset.dla]; download('album', a.id, a.title, a.artist); });
+  el.querySelectorAll('[data-amore]').forEach((b) => b.onclick = (e) => {
+    e.stopPropagation();
+    const a = list[+b.dataset.amore];
+    openMenu(b, [
+      { label: 'Play', run: () => playAlbum('jf', a.id) },
+      { label: 'Delete album', danger: true, icon: ITRASH, run: () => deleteItem('album', a, () => { b.closest('.card').remove(); }) },
+    ]);
+  });
   el.querySelectorAll('[data-pla]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); playAlbum(src === 'tidal' ? 'tidal' : 'jf', list[+b.dataset.pla].id); });
 }
 
@@ -657,7 +731,7 @@ async function renderArtist() {
       <div class="ahero"><div class="pic" style="${a.hasImage ? `background-image:${jfImg(a.id, 500)}` : ''}">${a.hasImage ? '' : initial(a.name)}</div>
         <div><div class="meta">Artist</div><h1>${esc(a.name)}</h1>
         <div class="meta">${a.albums.length} release${a.albums.length === 1 ? '' : 's'} in your library${a.genres.length ? ' · ' + esc(a.genres.slice(0, 3).join(', ')) : ''}</div>
-        <div class="acts"><button class="btn" id="aplay">${I.play.replace('<svg', '<svg width="16"')} Play</button><button class="btn sec" id="ashuf">Shuffle</button></div></div></div>
+        <div class="acts"><button class="btn" id="aplay">${I.play.replace('<svg', '<svg width="16"')} Play</button><button class="btn sec" id="ashuf">Shuffle</button><button class="ib more" id="armenu" title="More">${IMORE}</button></div></div></div>
       ${top.length ? `<h2>${a.topByPlays ? 'Top songs' : 'Songs'}</h2><div id="atop">${trackRows(top)}</div>` : ''}
       ${full.length ? `<h2>Albums</h2><div id="afull">${albumCards(full, 'jf')}</div>` : ''}
       ${singles.length ? `<h2>Singles &amp; EPs</h2><div id="asing">${albumCards(singles, 'jf')}</div>` : ''}
@@ -675,6 +749,7 @@ async function renderArtist() {
       } catch (e) { toast(e.message, true); }
     };
     $('#aplay').onclick = () => playAll(false);
+    $('#armenu').onclick = (e) => { e.stopPropagation(); openMenu($('#armenu'), [{ label: 'Delete artist', danger: true, icon: ITRASH, run: () => deleteItem('artist', a, () => { history_.length ? $('#back').click() : go('library', {}, false); }) }]); };
     $('#ashuf').onclick = () => playAll(true);
     // Tidal releases you don't own yet
     const viewId = view.id;
@@ -724,8 +799,9 @@ async function renderAlbum() {
     main.innerHTML = `${backBtn()}
       <div class="hero"><div class="art" style="background-image:${a.hasImage ? jfImg(a.id, 500) : 'none'}"></div>
       <div><div class="meta">Album · In your library</div><h1>${esc(a.title)}</h1><div class="meta">${esc(a.artist)}${a.year ? ' · ' + a.year : ''} · ${list.length} tracks</div>
-      <div class="acts"><button class="btn" id="pa">${I.play.replace('<svg', '<svg width="16"')} Play</button></div></div></div>
+      <div class="acts"><button class="btn" id="pa">${I.play.replace('<svg', '<svg width="16"')} Play</button><button class="ib more" id="amenu" title="More">${IMORE}</button></div></div></div>
       <div id="tr">${trackRows(list, { showThumb: false, numbered: true })}</div>`;
+    $('#amenu').onclick = (e) => { e.stopPropagation(); openMenu($('#amenu'), [{ label: 'Delete album', danger: true, icon: ITRASH, run: () => deleteItem('album', a, () => { history_.length ? $('#back').click() : go('library', {}, false); }) }]); };
     bindBack(); bindRows($('#tr'), list);
     $('#pa').onclick = () => list.length && playList(list, 0);
   } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }

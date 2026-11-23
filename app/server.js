@@ -357,6 +357,31 @@ const server = http.createServer(async (req, res) => {
       if (!a) return fail(res, 404, 'Album not found');
       return send(res, 200, { ...mapJfAlbum(a), tracks: (tr.Items || []).map(mapJfTrack) });
     }
+    if (p === '/api/library/delete' && req.method === 'POST') {
+      // Permanently deletes media files through Jellyfin. type: song | album | artist
+      const b = await readBody(req);
+      const id = String(b.id || '').replace(/[^\w-]/g, '');
+      if (!id) return fail(res, 400, 'Missing id');
+      let ids = [id];
+      if (b.type === 'artist') {
+        const j = await jf(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&AlbumArtistIds=${id}&Fields=Path`);
+        ids = (j.Items || []).map((i) => i.Id);
+        if (!ids.length) return fail(res, 404, 'No albums found for this artist');
+      }
+      const failed = [];
+      for (const x of ids) {
+        const r = await fetch(`${JF_URL}/Items/${x}`, { method: 'DELETE', headers: jfHeaders() });
+        if (!r.ok) failed.push(r.status);
+      }
+      libIndexCache = null;
+      if (failed.length) {
+        const st = failed[0];
+        const hint = st === 401 || st === 403 ? ' — Jellyfin refused: allow media deletion for the API key / admin user in Jellyfin.' : '';
+        return fail(res, 502, `Jellyfin could not delete ${failed.length} of ${ids.length} item(s) (HTTP ${st})${hint}`);
+      }
+      console.log(new Date().toISOString(), 'deleted', b.type, id, `(${ids.length} item(s))`);
+      return send(res, 200, { ok: true, deleted: ids.length });
+    }
     if (p === '/api/library/index') {
       // Compact list of what's in the library, so the UI can mark Tidal items you already have.
       if (!libIndexCache || Date.now() - libIndexCache.at > 60000 || q.get('fresh')) {
