@@ -208,6 +208,73 @@ html.fold #fs .fctl{padding:4px 6px}html.fold #fs .fctl .big{width:54px;height:5
 html.fold #fs .upnext{width:100%!important;margin-top:20px;max-height:none;background:rgba(0,0,0,.2)}
 html.fold #fs.empty .body{justify-content:center;align-items:center;color:#ffffffaa}
 
+/* ---------- LG TV (10-foot UI) ---------- */
+html.tv{font-size:20px}
+html.tv body{font-size:20px}
+html.tv header{left:150px;right:0;padding:22px 48px 18px;background:linear-gradient(var(--bg),rgba(11,13,16,0));border:0;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none}
+html.tv header .logo,html.tv .dots,html.tv #appset{display:none}
+html.tv header .search{max-width:760px;margin-left:0;flex:1}
+html.tv:not([data-view=search]) header .search{visibility:hidden}
+html.tv .search input{font-size:24px;padding:16px 26px}
+html.tv nav{position:fixed;left:0;top:0;bottom:0;width:150px;z-index:25;flex-direction:column;justify-content:center;gap:18px;padding:0 14px;
+ background:var(--glass-strong);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border-right:1px solid var(--glass-line)}
+html.tv nav button{flex-direction:column;gap:8px;font-size:17px;padding:18px 0;width:100%;border-radius:22px;background:none!important;box-shadow:none!important}
+html.tv nav button svg{display:block;width:38px;height:38px}
+html.tv nav button.on{color:var(--accent)}
+html.tv main{margin-left:150px;padding:110px 56px 210px!important;scroll-behavior:smooth}
+html.tv .pagetitle{font-size:52px;margin-bottom:26px}
+html.tv h2{font-size:22px}
+html.tv .shelfh h3{font-size:30px}
+html.tv .quick{grid-template-columns:repeat(4,1fr);gap:16px}
+html.tv .qt{height:88px;font-size:20px;border-radius:12px}html.tv .qt i{width:88px;height:88px}
+html.tv .hrow,html.tv .arow{grid-auto-columns:250px;gap:28px;padding:14px 10px 18px;margin:0 -10px;scroll-padding:0 60px}
+html.tv .grid{grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:32px}
+html.tv .agrid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:34px}
+html.tv .card .t{font-size:21px}html.tv .card .a{font-size:17px}
+html.tv .acard .n{font-size:20px}
+html.tv .row{grid-template-columns:50px 76px minmax(0,1fr) auto 64px;padding:12px 16px;border-radius:14px}
+html.tv .row .th{width:76px;height:76px}
+html.tv .row .rt{font-size:22px}html.tv .row .ra{font-size:17px}html.tv .row .d{font-size:18px}
+html.tv .ib{width:56px;height:56px}html.tv .ib svg{width:26px;height:26px}
+html.tv .btn{padding:16px 30px;font-size:20px}
+html.tv .ltabs button{padding:14px 28px;font-size:20px}
+html.tv footer{left:150px;right:0;bottom:0;border-radius:0;padding:22px 56px;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
+html.tv footer .np .th{width:84px;height:84px;border-radius:10px}
+html.tv footer .np .t{font-size:24px}html.tv footer .np .a{font-size:18px}
+html.tv footer .play{width:70px;height:70px}html.tv footer .play svg{width:32px;height:32px}
+html.tv footer .right input[type=range]{display:none}html.tv footer .right>svg{display:none}
+html.tv .toast{bottom:160px;right:60px;font-size:20px;padding:16px 24px}
+html.tv .modal{max-width:760px;padding:36px;font-size:20px}html.tv .modal h3{font-size:30px}
+html.tv .menu{min-width:320px}html.tv .menu button{font-size:20px;padding:16px 20px}
+/* focus: big, obvious, never hidden */
+html.tv :focus{outline:none}
+html.tv .tvf{outline:4px solid var(--accent)!important;outline-offset:6px;border-radius:14px;transform:scale(1.05);transition:transform .15s,outline-color .15s;z-index:2;position:relative}
+html.tv .card.tvf,html.tv .acard.tvf{outline:none!important;transform:scale(1.08)}
+html.tv .card.tvf .art,html.tv .acard.tvf .pic{outline:5px solid var(--accent);outline-offset:4px;box-shadow:0 18px 50px rgba(0,0,0,.6)}
+html.tv .row.tvf{transform:none;background:rgba(255,255,255,.12)}
+html.tv nav button.tvf{transform:scale(1.06);outline-offset:0}
+/* TV now playing: cover | lyrics | up next */
+html.tv #fs .top{display:none}
+html.tv #fs .body{display:grid!important;grid-template-columns:31vw minmax(0,1fr);gap:4vw;align-items:center;padding:5vh 5vw;overflow:hidden}
+html.tv #fs .left{display:flex;flex-direction:column;align-items:center}
+html.tv #fs .cover{width:min(30vw,52vh)!important;border-radius:20px}
+html.tv #fs .meta,html.tv #fs .fseek,html.tv #fs .fctl{width:min(30vw,52vh)!important}
+html.tv #fs .ft{font-size:36px}html.tv #fs .fa{font-size:26px}html.tv #fs .falb{font-size:20px}
+html.tv #fs .times{font-size:18px}
+html.tv #fs .fctl .big{width:92px;height:92px}html.tv #fs .fctl .big svg{width:40px;height:40px}
+html.tv #fs .fctl .ib{width:68px;height:68px}html.tv #fs .fctl .ib svg{width:32px;height:32px}
+html.tv #fs .upnext{width:auto!important;max-height:86vh;height:86vh;display:grid;grid-template-columns:minmax(0,1fr) 27%;gap:3vw;background:none;border:0;padding:0;margin:0;overflow:hidden}
+html.tv #fs .fstabs{display:none}
+html.tv #fs-ly,html.tv #fs-ly[hidden]{display:block!important;order:1;max-height:86vh;padding-bottom:40vh}
+html.tv #fs-q,html.tv #fs-q[hidden]{order:2}
+html.tv #fs-ly .ln{font-size:44px;line-height:1.3;margin-bottom:26px}
+html.tv #fs-ly.plain .ln{font-size:32px}
+html.tv #fs-q,html.tv #fs-q[hidden]{display:block!important;overflow:auto;max-height:86vh;background:rgba(0,0,0,.22);border-radius:22px;padding:22px}
+html.tv #fs-q::before{content:"Up next";display:block;font-size:18px;letter-spacing:1px;text-transform:uppercase;color:#ffffffaa;margin-bottom:12px}
+html.tv #fs .qi{grid-template-columns:64px 1fr auto;padding:10px}
+html.tv #fs .qi .th{width:64px;height:64px}html.tv #fs .qi .t{font-size:20px}html.tv #fs .qi .a{font-size:16px}
+html.tv #fs .ib.tvf,html.tv #fs .big.tvf{outline-color:#fff}
+
 /* ---------- Android app ---------- */
 .in-app .right input[type=range],.in-app .right>svg{display:none}
 .in-app #appset{margin-left:4px}
@@ -353,11 +420,17 @@ html.fold #fs.empty .body{justify-content:center;align-items:center;color:#fffff
 const $ = (s, el = document) => el.querySelector(s);
 const main = $('#main');
 // Layout: phone (narrow), fold (unfolded Z Fold / tablet touch screen), desktop.
+// LG TV: webOS user agent, or opened with ?tv=1 (the webOS app does this)
+const IS_TV = (() => {
+  try { if (new URLSearchParams(location.search).has('tv')) sessionStorage.tfTv = '1'; } catch {}
+  let flag = false; try { flag = sessionStorage.tfTv === '1'; } catch {}
+  return flag || /web0s|webos|netcast|smart-?tv/i.test(navigator.userAgent);
+})();
 function setLayout() {
   const w = window.innerWidth, touch = matchMedia('(pointer:coarse)').matches;
-  const mode = w < 700 ? 'phone' : (touch && w < 1300 ? 'fold' : 'desktop');
+  const mode = IS_TV ? 'tv' : w < 700 ? 'phone' : (touch && w < 1300 ? 'fold' : 'desktop');
   const el = document.documentElement;
-  ['phone', 'fold', 'desktop'].forEach((m) => el.classList.toggle(m, m === mode));
+  ['phone', 'fold', 'desktop', 'tv'].forEach((m) => el.classList.toggle(m, m === mode));
   // the tab bar / side rail must live outside the glass header (backdrop-filter traps fixed children)
   const nav = document.querySelector('nav'), header = document.querySelector('header');
   if (mode === 'desktop') { if (nav.parentElement !== header) header.insertBefore(nav, header.querySelector('.search')); }
@@ -1210,6 +1283,81 @@ async function renderArtist() {
   } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }
 }
 
+// ---------- TV: d-pad spatial navigation + remote keys ----------
+function initTv() {
+  const FOCUSABLE = 'nav button, header input, main button, main .card, main .acard, main .qt, main .gtile, main .row, main select, main .back, footer button, footer .np, .modal button, .modal input, .menu button, #fs button, #fs .qi, #fs .falb';
+  const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.bottom > -200 && r.top < innerHeight + 2000 && getComputedStyle(el).visibility !== 'hidden'; };
+  const scope = () => document.querySelector('.modal-bg') || document.querySelector('.menu') || (fs.classList.contains('open') ? fs : document);
+  const items = () => [...scope().querySelectorAll(FOCUSABLE)].filter((el) => !el.disabled && !el.closest('[hidden]') && visible(el) && !(scope() === document && el.closest('#fs')));
+  let cur = null;
+  const setF = (el) => {
+    if (!el) return;
+    if (cur) cur.classList.remove('tvf');
+    cur = el; el.classList.add('tvf');
+    if (!el.hasAttribute('tabindex') && !/^(BUTTON|INPUT|SELECT)$/.test(el.tagName)) el.setAttribute('tabindex', '-1');
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ block: el.closest('nav,footer') ? 'nearest' : 'center', inline: 'nearest', behavior: 'smooth' });
+  };
+  const centre = (r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  function move(dir) {
+    const list = items();
+    if (!cur || !document.contains(cur) || !list.includes(cur)) { setF(list.find((e) => e.closest('main')) || list[0]); return; }
+    const a = cur.getBoundingClientRect(), c = centre(a);
+    let best = null, bestScore = Infinity;
+    for (const el of list) {
+      if (el === cur) continue;
+      const b = el.getBoundingClientRect(), d = centre(b);
+      const dx = d.x - c.x, dy = d.y - c.y;
+      let main, cross;
+      if (dir === 'left') { if (b.right > a.left + 4) continue; main = -dx; cross = Math.abs(dy); }
+      if (dir === 'right') { if (b.left < a.right - 4) continue; main = dx; cross = Math.abs(dy); }
+      if (dir === 'up') { if (b.bottom > a.top + 4) continue; main = -dy; cross = Math.abs(dx); }
+      if (dir === 'down') { if (b.top < a.bottom - 4) continue; main = dy; cross = Math.abs(dx); }
+      // stay in the same area (side menu / page / player bar) unless moving sideways into it
+      const region = (x) => x.closest('nav') ? 'nav' : x.closest('footer') ? 'footer' : 'main';
+      const jump = region(el) !== region(cur) && (dir === 'up' || dir === 'down') ? 2000 : 0;
+      const score = main + cross * 2.2 + jump;
+      if (score < bestScore) { bestScore = score; best = el; }
+    }
+    if (best) setF(best);
+  }
+  // keep focus ring when the pointer (Magic Remote) hovers something
+  document.addEventListener('mouseover', (e) => { const el = e.target.closest(FOCUSABLE); if (el && items().includes(el)) { if (cur) cur.classList.remove('tvf'); cur = el; el.classList.add('tvf'); } });
+  document.addEventListener('keydown', (e) => {
+    const k = e.key, code = e.keyCode;
+    const typing = document.activeElement && document.activeElement.tagName === 'INPUT';
+    const dirs = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+    if (dirs[k]) {
+      if (typing && (k === 'ArrowLeft' || k === 'ArrowRight')) return; // move the text cursor
+      e.preventDefault(); move(dirs[k]); return;
+    }
+    if (k === 'Enter' && cur && !typing && !/^(BUTTON|INPUT|SELECT)$/.test(cur.tagName)) { e.preventDefault(); cur.click(); return; }
+    if (code === 461 || k === 'GoBack' || k === 'BrowserBack') { // LG remote Back
+      e.preventDefault();
+      if (fs.classList.contains('open') || document.querySelector('.modal-bg, .menu') || history_.length) history.back();
+      else if (view.name !== 'home') go('home', {}, false);
+      else { const sys = window.webOSSystem || window.PalmSystem; if (sys && sys.platformBack) sys.platformBack(); } // leave the TV app
+      return;
+    }
+    // media keys on the remote
+    if (code === 415 || k === 'MediaPlay') { e.preventDefault(); if (audio.paused) $('#pp').onclick(); return; }
+    if (code === 19 || k === 'MediaPause') { e.preventDefault(); if (!audio.paused) $('#pp').onclick(); return; }
+    if (k === 'MediaPlayPause' || code === 179) { e.preventDefault(); $('#pp').onclick(); return; }
+    if (code === 417 || code === 176 || k === 'MediaTrackNext' || k === 'MediaFastForward' || code === 33) { e.preventDefault(); nextTrack(false); return; }
+    if (code === 412 || code === 177 || k === 'MediaTrackPrevious' || k === 'MediaRewind' || code === 34) { e.preventDefault(); $('#prev').onclick(); return; }
+    if (code === 413 || k === 'MediaStop') { e.preventDefault(); audio.pause(); return; }
+  }, true);
+  // re-focus something sensible after each page change / dialog
+  const refocus = () => setTimeout(() => { if (!cur || !document.contains(cur) || !items().includes(cur)) { const l = items(); setF(l.find((e) => e.closest('#fs .fctl .big')) || l.find((e) => e.closest('main') && e.id === 'pa') || l.find((e) => e.closest('main') && !e.closest('.ltabs') && !e.classList.contains('back')) || l[0]); } }, 350);
+  new MutationObserver(refocus).observe(main, { childList: true });
+  new MutationObserver(refocus).observe(document.body, { childList: true });
+  new MutationObserver(refocus).observe(fs, { attributes: true, attributeFilter: ['class'] });
+  // the big player opens on its own when a song starts on the TV
+  const _load = loadCurrent;
+  loadCurrent = function () { _load.apply(this, arguments); if (!fs.classList.contains('open')) openFs(); setFsTab('ly'); };
+  refocus();
+}
+
 function greeting() {
   const h = new Date().getHours();
   return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
@@ -1366,6 +1514,7 @@ if (NATIVE) {
   const g = $('#appset'); g.hidden = false; g.onclick = () => NATIVE.openSettings();
 }
 window.__tfReady = true; setLayout();
+if (IS_TV) initTv();
 go('home', {}, false);
 pollQueue();
 </script>
