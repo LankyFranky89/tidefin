@@ -1,0 +1,24 @@
+# Tidefin — Jellyfin music player with Tidal search + Tidarr downloads
+# UGOS: Docker app → Project → tidefin → replace the compose with this file → Redeploy.
+# Only the 5 lines marked PASTE need your values.
+services:
+  tidefin:
+    image: node:22-alpine
+    container_name: tidefin
+    restart: unless-stopped
+    working_dir: /app
+    command: ["node", "server.js"]
+    network_mode: host        # app listens on NAS port 8585 and reaches Jellyfin/Tidarr via 127.0.0.1
+    volumes:
+      - /volume1/docker/tidefin/app:/app:ro
+    environment:
+      - PORT=8585
+      - TZ=Europe/Oslo
+      - JELLYFIN_URL=http://127.0.0.1:8096
+      - TIDARR_URL=http://127.0.0.1:8484
+      - JELLYFIN_API_KEY=PASTE_JELLYFIN_API_KEY
+      - TIDARR_API_KEY=PASTE_TIDARR_API_KEY
+      - TIDAL_CLIENT_ID=PASTE_TIDAL_CLIENT_ID
+      - TIDAL_CLIENT_SECRET=PASTE_TIDAL_CLIENT_SECRET
+      - TIDAL_COUNTRY=NO
+      - APP_PASSWORD=
