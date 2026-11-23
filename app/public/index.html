@@ -378,7 +378,10 @@ function loadCurrent() {
   if (t.src === 'tidal') {
     const local = libTrackMap.get(nkey(t.artist, t.title));
     if (local) src = `/api/library/stream/${local.id}`;
-    else previewMode = true;
+    else {
+      previewMode = true;
+      src = `/api/tidal/preview/${t.id}?` + new URLSearchParams({ isrc: t.isrc || '', artist: t.artist || '', title: t.title || '' });
+    }
   }
   audio.src = src;
   audio.play().catch(() => {});

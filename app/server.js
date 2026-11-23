@@ -83,6 +83,7 @@ const mapJfArtist = (i) => ({ id: i.Id, name: i.Name, hasImage: !!(i.ImageTags &
 // A Jellyfin user is needed for per-user data such as play counts (top songs).
 let jfUserId = null;
 let libIndexCache = null;
+const previewCache = new Map(); // tidal id -> preview url (or null)
 async function jfUser() {
   if (jfUserId) return jfUserId;
   const users = await jf('/Users');
@@ -194,7 +195,7 @@ async function tidalSearch(q) {
   const tracks = order(trackIds, tDoc.data || []).map((t) => {
     const alb = tMap.get(`albums:${relIds(t, 'albums')[0]?.id}`);
     return {
-      id: t.id, title: t.attributes?.title + (t.attributes?.version ? ` (${t.attributes.version})` : ''),
+      id: t.id, isrc: t.attributes?.isrc || null, title: t.attributes?.title + (t.attributes?.version ? ` (${t.attributes.version})` : ''),
       artist: artistNames(tMap, t), album: alb?.attributes?.title || '', albumId: alb?.id || null,
       duration: isoDur(t.attributes?.duration), explicit: !!t.attributes?.explicit,
       cover: alb ? pickCover(tMap, alb) : null,
@@ -269,7 +270,7 @@ async function tidalAlbum(id) {
       const t = (doc.data || []).find((x) => String(x.id) === String(c.id));
       if (!t) continue;
       tracks.push({
-        id: t.id, title: t.attributes?.title + (t.attributes?.version ? ` (${t.attributes.version})` : ''),
+        id: t.id, isrc: t.attributes?.isrc || null, title: t.attributes?.title + (t.attributes?.version ? ` (${t.attributes.version})` : ''),
         artist: artistNames(m, t), number: c.meta.trackNumber || null, disc: c.meta.volumeNumber || null,
         duration: isoDur(t.attributes?.duration), explicit: !!t.attributes?.explicit,
       });
@@ -491,6 +492,38 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if ((m = /^\/api\/tidal\/album\/(\d+)$/.exec(p))) return send(res, 200, await tidalAlbum(m[1]));
+
+    // --- 30-second previews: Deezer (by ISRC) -> Apple (by name) -> Tidarr fallback ---
+    if ((m = /^\/api\/tidal\/preview\/(\d+)$/.exec(p))) {
+      const key = m[1];
+      let url = previewCache.get(key);
+      if (url === undefined) {
+        url = null;
+        const isrc = (q.get('isrc') || '').replace(/[^A-Za-z0-9]/g, '');
+        const artist = q.get('artist') || '', title = (q.get('title') || '').replace(/\s*[\(\[].*?[\)\]]/g, '');
+        try {
+          if (isrc) {
+            const d = await fetch(`https://api.deezer.com/2.0/track/isrc:${isrc}`).then((r) => r.json());
+            if (d && d.preview) url = d.preview;
+          }
+          if (!url && artist && title) {
+            const d = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(`artist:"${artist.split(',')[0]}" track:"${title}"`)}&limit=1`).then((r) => r.json());
+            if (d && d.data && d.data[0] && d.data[0].preview) url = d.data[0].preview;
+          }
+          if (!url && artist && title) {
+            const d = await fetch(`https://itunes.apple.com/search?media=music&entity=song&limit=1&term=${encodeURIComponent(artist.split(',')[0] + ' ' + title)}`).then((r) => r.json());
+            if (d && d.results && d.results[0] && d.results[0].previewUrl) url = d.results[0].previewUrl;
+          }
+        } catch (e) { console.error('preview lookup failed', e.message); }
+        previewCache.set(key, url);
+      }
+      if (!url) { res.writeHead(302, { Location: `/api/tidal/stream/${key}` }); return res.end(); }
+      const headers = {};
+      if (req.headers.range) headers.Range = req.headers.range;
+      const up = await fetch(url, { headers });
+      if (!up.ok && up.status !== 206) { previewCache.delete(key); return fail(res, 502, `Preview source failed (${up.status})`); }
+      return pipeUpstream(up, res);
+    }
 
     // --- Tidal playback through Tidarr (your Tidal account) ---
     if ((m = /^\/api\/tidal\/stream\/(\d+)$/.exec(p))) {
