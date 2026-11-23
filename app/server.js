@@ -438,6 +438,17 @@ const server = http.createServer(async (req, res) => {
       if (!term) return send(res, 200, { tracks: [], albums: [] });
       return send(res, 200, await tidalSearch(term));
     }
+    if (p === '/api/tidal/debug') {
+      const type = q.get('type') || 'albums';
+      const doc = await tidal('/searchResults', [['filter[query]', q.get('q') || ''], ['explicitFilter', 'INCLUDE'], ['include', type]]);
+      const res0 = Array.isArray(doc.data) ? doc.data[0] : doc.data;
+      return send(res, 200, {
+        version: 'search-split-1', dataIsArray: Array.isArray(doc.data), dataType: res0 && res0.type, dataId: res0 && res0.id,
+        relKeys: res0 && res0.relationships ? Object.keys(res0.relationships) : null,
+        rel: res0 && res0.relationships && res0.relationships[type],
+        includedTypes: (doc.included || []).reduce((o, x) => { o[x.type] = (o[x.type] || 0) + 1; return o; }, {}),
+      });
+    }
     if ((m = /^\/api\/tidal\/album\/(\d+)$/.exec(p))) return send(res, 200, await tidalAlbum(m[1]));
 
     // --- Tidal playback through Tidarr (your Tidal account) ---
