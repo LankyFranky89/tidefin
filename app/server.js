@@ -417,7 +417,7 @@ const server = http.createServer(async (req, res) => {
       const owned = new Set(((libIndexCache && libIndexCache.albums) || []).map(([ar, t]) => norm(ar) + '|' + norm(t)));
       const cutoff = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
       const out = [];
-      await Promise.all(names.map(async (n) => {
+      for (const n of names) { // one artist at a time: Tidal rate-limits bursts
         try {
           let c = artistAlbumCache.get(n.toLowerCase());
           if (!c || Date.now() - c.at > 6 * 3600e3) { c = { at: Date.now(), data: await tidalArtistAlbums(n) }; artistAlbumCache.set(n.toLowerCase(), c); }
@@ -426,8 +426,8 @@ const server = http.createServer(async (req, res) => {
             if (owned.has(norm(n) + '|' + norm(al.title))) continue;
             out.push(al);
           }
-        } catch (e) { /* skip artists Tidal can't find */ }
-      }));
+        } catch (e) { console.error('new releases:', n, e.message); }
+      }
       out.sort((x, y) => (y.date || '').localeCompare(x.date || ''));
       return send(res, 200, { albums: out.slice(0, 24) });
     }
