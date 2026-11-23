@@ -82,6 +82,7 @@ const mapJfArtist = (i) => ({ id: i.Id, name: i.Name, hasImage: !!(i.ImageTags &
 
 // A Jellyfin user is needed for per-user data such as play counts (top songs).
 let jfUserId = null;
+let libIndexCache = null;
 async function jfUser() {
   if (jfUserId) return jfUserId;
   const users = await jf('/Users');
@@ -355,6 +356,21 @@ const server = http.createServer(async (req, res) => {
       const a = (info.Items || [])[0];
       if (!a) return fail(res, 404, 'Album not found');
       return send(res, 200, { ...mapJfAlbum(a), tracks: (tr.Items || []).map(mapJfTrack) });
+    }
+    if (p === '/api/library/index') {
+      // Compact list of what's in the library, so the UI can mark Tidal items you already have.
+      if (!libIndexCache || Date.now() - libIndexCache.at > 60000 || q.get('fresh')) {
+        const [al, tr] = await Promise.all([
+          jf('/Items?IncludeItemTypes=MusicAlbum&Recursive=true&Fields=AlbumArtist&EnableImages=false&Limit=20000'),
+          jf('/Items?IncludeItemTypes=Audio&Recursive=true&Fields=AlbumArtist&EnableImages=false&Limit=50000'),
+        ]);
+        libIndexCache = {
+          at: Date.now(),
+          albums: (al.Items || []).map((i) => [i.AlbumArtist || (i.Artists || [])[0] || '', i.Name]),
+          tracks: (tr.Items || []).map((i) => [(i.Artists || [])[0] || i.AlbumArtist || '', i.Name]),
+        };
+      }
+      return send(res, 200, { albums: libIndexCache.albums, tracks: libIndexCache.tracks });
     }
     if (p === '/api/library/artists') {
       const start = parseInt(q.get('start') || '0', 10) || 0;

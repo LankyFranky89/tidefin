@@ -23,12 +23,29 @@ h2{font-size:15px;margin:22px 0 12px;color:var(--dim);font-weight:600;text-trans
 h2 .tag{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--panel2);text-transform:none;letter-spacing:0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:18px}
 .card{cursor:pointer;min-width:0}.card .art{aspect-ratio:1;border-radius:var(--r);background:var(--panel2) center/cover;position:relative;overflow:hidden}
-.card:hover .art{outline:2px solid var(--accent)}
+.card:hover .t{color:var(--accent)}
 .card .t{margin-top:8px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.card .a{color:var(--dim);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .badge{position:absolute;top:8px;left:8px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;background:#000a;color:var(--accent)}
 .rows{display:flex;flex-direction:column}
-.row{display:grid;grid-template-columns:32px 44px 1fr auto auto 40px;align-items:center;gap:12px;padding:6px 10px;border-radius:8px}
+.row{display:grid;grid-template-columns:32px 44px minmax(0,1fr) auto 40px;align-items:center;gap:12px;padding:6px 10px;border-radius:10px;transition:background .15s}
 .row:hover{background:var(--panel)}.row.playing{background:var(--panel2)}.row.playing .rt{color:var(--accent)}
+.row .th{position:relative;display:grid;place-items:center;cursor:pointer}
+.row .th .pb{width:30px;height:30px;border-radius:50%;background:#000a;color:#fff;display:grid;place-items:center;opacity:0;transition:opacity .15s,transform .15s;transform:scale(.85)}
+.row .th .pb svg{width:16px;height:16px}
+.row:hover .th .pb,.row.playing .th .pb,.row .th.nothumb .pb{opacity:1;transform:none}
+.row .th.nothumb{background:transparent}.row .th.nothumb .pb{background:var(--panel2);color:var(--text)}
+.row.playing .th .pb{background:var(--accent);color:#04201b}
+@media(hover:none){.row .th .pb{opacity:1;transform:none}}
+.ib.dl{background:var(--panel2)}.ib.dl.done{background:#1b3324;color:var(--ok)}.ib.dl.queued{color:var(--accent)}
+.card .art .pl{position:absolute;left:8px;bottom:8px;width:42px;height:42px;border-radius:50%;background:var(--accent);color:#04201b;display:grid;place-items:center;box-shadow:0 4px 12px #0008;opacity:.92;transition:transform .15s,opacity .15s}
+.card .art .pl svg{width:20px;height:20px}
+.card .art .pl:hover{transform:scale(1.08);opacity:1}
+.card .art .ck{position:absolute;right:8px;top:8px;width:28px;height:28px;border-radius:50%;background:var(--ok);color:#0b2a14;display:grid;place-items:center;box-shadow:0 2px 8px #0007}
+.card .art .ck svg{width:16px;height:16px}
+.card .tt{display:flex;align-items:flex-start;gap:6px;margin-top:8px}
+.card .tt>div{flex:1;min-width:0}.card .tt .t{margin-top:0}
+.card .tt .ib{width:30px;height:30px;flex:none}.card .tt .ib svg{width:16px;height:16px}
+.card .art{transition:transform .2s}.card:hover .art{outline:none;transform:translateY(-2px)}
 .row .n{color:var(--dim);text-align:center;font-variant-numeric:tabular-nums}
 .row .th{width:44px;height:44px;border-radius:6px;background:var(--panel2) center/cover}
 .row .rt{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row .ra{color:var(--dim);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -144,7 +161,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 @media(max-width:760px){
  header{flex-wrap:wrap;padding:10px 12px}.search{order:3;max-width:none;flex-basis:100%}.dots{display:none}
  main{padding:14px 12px 150px}.grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px}
- .row{grid-template-columns:44px 1fr auto 36px;gap:10px}.row .n,.row .d{display:none}
+ .row{grid-template-columns:44px minmax(0,1fr) 36px;gap:10px}.row .n,.row .d{display:none}
  .hero{flex-direction:column;align-items:flex-start}.hero .art{width:150px;height:150px}
  footer{grid-template-columns:1fr auto;padding:8px 12px calc(8px + env(safe-area-inset-bottom))}.right{display:none}.ctl{width:auto}.seek{display:none}
  .qrow{grid-template-columns:1fr 100px}.qrow .bar{display:none}
@@ -213,6 +230,7 @@ const I = {
   ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
   err: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 7v6m0 4v.01"/></svg>',
 };
+const ICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (s) => { if (!s && s !== 0 || !isFinite(s)) return '–'; s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const jfImg = (id, h = 300) => id ? `url('/api/library/image/${id}?h=${h}')` : 'none';
@@ -227,6 +245,25 @@ async function api(path, opts) {
 let toastT;
 function toast(msg, err) { const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (err ? ' err' : ''); clearTimeout(toastT); toastT = setTimeout(() => t.className = 'toast', 3500); }
 
+// ---------- what's already in the library ----------
+const nkey = (artist, title) => normT(String(artist || '').split(/,|&| feat\.? | ft\.? /i)[0]) + '|' + normT(title);
+function normT(x) { return String(x || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/\(.*?\)|\[.*?\]/g, '').replace(/ - .*(remaster|version|edition|deluxe|live|mix).*$/i, '').replace(/[^a-z0-9]/g, ''); }
+let libAlbums = new Set(), libTracks = new Set();
+async function loadLibIndex(fresh) {
+  try {
+    const r = await api('/api/library/index' + (fresh ? '?fresh=1' : ''));
+    libAlbums = new Set(r.albums.map(([a, t]) => nkey(a, t)));
+    libTracks = new Set(r.tracks.map(([a, t]) => nkey(a, t)));
+    refreshDlButtons();
+  } catch {}
+}
+const albumInLib = (a) => libAlbums.has(nkey(a.artist, a.title));
+const trackInLib = (t) => libTracks.has(nkey(t.artist, t.title));
+// mark Tidal items you already own as done (green check)
+function markOwned(list, kind) {
+  for (const x of list) if (!dlState.get(String(x.id)) && (kind === 'album' ? albumInLib(x) : trackInLib(x))) dlState.set(String(x.id), 'done');
+}
+
 // ---------- download state (Tidal id -> status) ----------
 const dlState = new Map(); // id -> 'queued' | 'done' | 'err'
 const STATUS_MAP = { queue_download: 'queued', download: 'queued', queue_processing: 'queued', processing: 'queued', finished: 'done', error: 'err' };
@@ -234,6 +271,7 @@ function dlIcon(id) { const s = dlState.get(String(id)); return s === 'queued' ?
 function dlClass(id) { return 'ib dl ' + (dlState.get(String(id)) || ''); }
 function refreshDlButtons() {
   document.querySelectorAll('[data-dl]').forEach((b) => { const id = b.dataset.dl; b.className = dlClass(id); b.innerHTML = dlIcon(id); });
+  document.querySelectorAll('[data-ck]').forEach((c) => { c.hidden = dlState.get(c.dataset.ck) !== 'done'; });
   updateNowDl();
 }
 async function download(type, id, title, artist) {
@@ -252,7 +290,9 @@ async function pollQueue(force) {
   try {
     const { items } = await api('/api/queue');
     queueCache = items;
-    for (const it of items) { const s = STATUS_MAP[it.status]; if (s) dlState.set(String(it.id), s); }
+    let newlyDone = false;
+    for (const it of items) { const s = STATUS_MAP[it.status]; if (s) { if (s === 'done' && dlState.get(String(it.id)) === 'queued') newlyDone = true; dlState.set(String(it.id), s); } }
+    if (newlyDone) setTimeout(() => loadLibIndex(true), 8000); // give Jellyfin a moment to scan
     refreshDlButtons();
     if (view.name === 'downloads') renderDownloads();
     const busy = items.some((i) => STATUS_MAP[i.status] === 'queued');
@@ -307,14 +347,18 @@ function updateNowDl() {
 }
 function markPlaying() {
   const t = queue[qi];
-  document.querySelectorAll('.row[data-key]').forEach((r) => r.classList.toggle('playing', !!t && r.dataset.key === `${t.src}:${t.id}`));
+  document.querySelectorAll('.row[data-key]').forEach((r) => {
+    const on = !!t && r.dataset.key === `${t.src}:${t.id}`;
+    r.classList.toggle('playing', on);
+    const pb = r.querySelector('.pb'); if (pb) pb.innerHTML = on && !audio.paused ? I.pause : I.play;
+  });
 }
 const setPP = () => { $('#pp').innerHTML = audio.paused ? I.play : I.pause; $('#fs-pp').innerHTML = audio.paused ? I.play : I.pause; $('#fs').classList.toggle('paused', audio.paused); };
 setPP();
 $('#pp').onclick = () => { if (!audio.src) return; audio.paused ? audio.play() : audio.pause(); };
 $('#next').onclick = () => nextTrack(false);
 $('#prev').onclick = () => { if (audio.currentTime > 3 || qi <= 0) audio.currentTime = 0; else { qi--; loadCurrent(); } };
-audio.onplay = audio.onpause = setPP;
+audio.onplay = audio.onpause = () => { setPP(); markPlaying(); };
 audio.onended = () => nextTrack(true);
 audio.onerror = () => { const t = queue[qi]; if (t) toast(t.src === 'tidal' ? 'Tidal playback failed — you can still download it' : 'Could not play this file', true); };
 audio.ontimeupdate = () => {
@@ -436,33 +480,57 @@ document.addEventListener('keydown', (e) => { if (e.code === 'Space' && e.target
 // ---------- rendering ----------
 function trackRows(list, { showThumb = true, numbered = false } = {}) {
   if (!list.length) return '<div class="empty">No tracks</div>';
+  markOwned(list.filter((t) => t.src === 'tidal'), 'track');
   return '<div class="rows">' + list.map((t, i) => `
     <div class="row" data-key="${t.src}:${esc(t.id)}" data-i="${i}">
       <div class="n">${numbered ? (t.number || i + 1) : i + 1}</div>
-      <div class="th" style="background-image:${showThumb ? (t.src === 'tidal' ? bg(t.cover) : jfImg(t.imageId, 100)) : 'none'}"></div>
+      <div class="th${showThumb ? '' : ' nothumb'}" data-play="${i}" title="Play" style="background-image:${showThumb ? (t.src === 'tidal' ? bg(t.cover) : jfImg(t.imageId, 100)) : 'none'}"><span class="pb">${I.play}</span></div>
       <div style="min-width:0"><div class="rt">${esc(t.title)}${t.explicit ? '<span class="e">E</span>' : ''}</div><div class="ra">${esc(t.artist)}${t.album ? ' — ' + esc(t.album) : ''}</div></div>
       <div class="d">${fmt(t.duration)}</div>
-      <button class="ib" data-play="${i}" title="Play">${I.play}</button>
       ${t.src === 'tidal' ? `<button class="${dlClass(t.id)}" data-dl="${esc(t.id)}" data-i="${i}" title="Download to library">${dlIcon(t.id)}</button>` : '<span></span>'}
     </div>`).join('') + '</div>';
 }
 function bindRows(el, list) {
   el.querySelectorAll('.row').forEach((r) => r.addEventListener('dblclick', () => playList(list, +r.dataset.i)));
-  el.querySelectorAll('[data-play]').forEach((b) => b.onclick = () => playList(list, +b.dataset.play));
+  el.querySelectorAll('[data-play]').forEach((b) => b.onclick = () => {
+    const t = list[+b.dataset.play], cur = queue[qi];
+    if (cur && t && cur.src === t.src && String(cur.id) === String(t.id)) { audio.paused ? audio.play() : audio.pause(); return; }
+    playList(list, +b.dataset.play);
+  });
   el.querySelectorAll('[data-dl][data-i]').forEach((b) => b.onclick = () => { const t = list[+b.dataset.i]; download('track', t.id, t.title, t.artist); });
   markPlaying();
 }
 function albumCards(list, src, row = false) {
   if (!list.length) return '<div class="empty">No albums</div>';
-  return `<div class="${row ? 'hrow' : 'grid'}">` + list.map((a, i) => `
+  if (src === 'tidal') markOwned(list, 'album');
+  return `<div class="${row ? 'hrow' : 'grid'}">` + list.map((a, i) => {
+    const id = esc(a.id), done = src === 'tidal' && dlState.get(String(a.id)) === 'done';
+    return `
     <div class="card" data-alb="${i}">
-      <div class="art" style="background-image:${src === 'tidal' ? bg(a.cover) : (a.hasImage ? jfImg(a.id) : 'none')}">${src === 'tidal' ? `<span class="badge">TIDAL</span><span class="cdlw"><button class="${dlClass(a.id)}" data-dl="${esc(a.id)}" data-dla="${i}" title="Download album">${dlIcon(a.id)}</button></span>` : ''}</div>
-      <div class="t">${esc(a.title)}</div><div class="a">${esc(a.artist)}${a.year ? ' · ' + a.year : ''}</div>
-    </div>`).join('') + '</div>';
+      <div class="art" style="background-image:${src === 'tidal' ? bg(a.cover) : (a.hasImage ? jfImg(a.id) : 'none')}">
+        ${src === 'tidal' ? `<span class="badge">TIDAL</span><span class="ck" data-ck="${id}"${done ? '' : ' hidden'}>${ICK}</span>` : ''}
+        <button class="pl" data-pla="${i}" title="Play album">${I.play}</button>
+      </div>
+      <div class="tt"><div><div class="t">${esc(a.title)}</div><div class="a">${esc(a.artist)}${a.year ? ' · ' + a.year : ''}${done ? ' · In library' : ''}</div></div>
+        ${src === 'tidal' ? `<button class="${dlClass(a.id)}" data-dl="${id}" data-dla="${i}" title="Download album">${dlIcon(a.id)}</button>` : ''}</div>
+    </div>`;
+  }).join('') + '</div>';
+}
+async function playAlbum(src, id) {
+  try {
+    if (src === 'tidal') {
+      const a = await api(`/api/tidal/album/${id}`);
+      playList(a.tracks.map((t) => ({ ...t, src: 'tidal', album: a.title, albumId: a.id, cover: a.cover })), 0);
+    } else {
+      const a = await api(`/api/library/album/${id}`);
+      playList(a.tracks.map((t) => ({ ...t, src: 'jf' })), 0);
+    }
+  } catch (e) { toast(e.message, true); }
 }
 function bindCards(el, list, src) {
   el.querySelectorAll('[data-alb]').forEach((c) => c.onclick = () => go(src === 'tidal' ? 'tidalAlbum' : 'album', { id: list[+c.dataset.alb].id }));
   el.querySelectorAll('[data-dla]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); const a = list[+b.dataset.dla]; download('album', a.id, a.title, a.artist); });
+  el.querySelectorAll('[data-pla]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); playAlbum(src === 'tidal' ? 'tidal' : 'jf', list[+b.dataset.pla].id); });
 }
 
 let view = { name: 'library' }, history_ = [];
@@ -677,6 +745,7 @@ async function renderTidalAlbum() {
     bindBack(); bindRows($('#tr'), list);
     $('#pa').onclick = () => list.length && playList(list, 0);
     $('#da').onclick = () => download('album', a.id, a.title, a.artist);
+    if (albumInLib(a) || dlState.get(String(a.id)) === 'done') { const b = $('#da'); b.innerHTML = ICK.replace('<svg', '<svg width="16"') + ' In library'; b.style.color = 'var(--ok)'; b.title = 'Already in your library — click to download again'; }
   } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }
 }
 
@@ -733,6 +802,7 @@ api('/api/health').then((h) => {
     main.prepend(box);
   }
 }).catch(() => {});
+loadLibIndex();
 go('library', {}, false);
 pollQueue();
 </script>
