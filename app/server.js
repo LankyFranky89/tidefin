@@ -83,6 +83,7 @@ const mapJfArtist = (i) => ({ id: i.Id, name: i.Name, hasImage: !!(i.ImageTags &
 // A Jellyfin user is needed for per-user data such as play counts (top songs).
 let jfUserId = null;
 let libIndexCache = null;
+const artistAlbumCache = new Map(); // artist name -> {at, data}
 const previewCache = new Map(); // tidal id -> preview url (or null)
 async function jfUser() {
   if (jfUserId) return jfUserId;
@@ -383,6 +384,27 @@ const server = http.createServer(async (req, res) => {
       console.log(new Date().toISOString(), 'deleted', b.type, id, `(${ids.length} item(s))`);
       return send(res, 200, { ok: true, deleted: ids.length });
     }
+    if (p === '/api/home/new') {
+      // Tidal releases from the last 12 months by artists you have, that you don't own yet.
+      const names = (q.get('artists') || '').split('|').map((x) => x.trim()).filter(Boolean).slice(0, 10);
+      const norm = (x) => String(x || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^a-z0-9]/g, '');
+      const owned = new Set(((libIndexCache && libIndexCache.albums) || []).map(([ar, t]) => norm(ar) + '|' + norm(t)));
+      const cutoff = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+      const out = [];
+      await Promise.all(names.map(async (n) => {
+        try {
+          let c = artistAlbumCache.get(n.toLowerCase());
+          if (!c || Date.now() - c.at > 6 * 3600e3) { c = { at: Date.now(), data: await tidalArtistAlbums(n) }; artistAlbumCache.set(n.toLowerCase(), c); }
+          for (const al of c.data.albums || []) {
+            if ((al.date || '') < cutoff || al.type === 'SINGLE') continue;
+            if (owned.has(norm(n) + '|' + norm(al.title))) continue;
+            out.push(al);
+          }
+        } catch (e) { /* skip artists Tidal can't find */ }
+      }));
+      out.sort((x, y) => (y.date || '').localeCompare(x.date || ''));
+      return send(res, 200, { albums: out.slice(0, 24) });
+    }
     if (p === '/api/library/index') {
       // Compact list of what's in the library, so the UI can mark Tidal items you already have.
       if (!libIndexCache || Date.now() - libIndexCache.at > 60000 || q.get('fresh')) {
@@ -392,7 +414,12 @@ const server = http.createServer(async (req, res) => {
         ]);
         libIndexCache = {
           at: Date.now(),
-          albums: (al.Items || []).map((i) => [i.AlbumArtist || (i.Artists || [])[0] || '', i.Name]),
+          albums: (() => {
+            // how many songs of each album you actually have (one downloaded song != whole album)
+            const per = new Map();
+            for (const t of tr.Items || []) if (t.AlbumId) per.set(t.AlbumId, (per.get(t.AlbumId) || 0) + 1);
+            return (al.Items || []).map((i) => [i.AlbumArtist || (i.Artists || [])[0] || '', i.Name, per.get(i.Id) || 0]);
+          })(),
           tracks: (tr.Items || []).map((i) => [(i.Artists || [])[0] || i.AlbumArtist || '', i.Name, i.Id, i.Album || '', (i.ImageTags && i.ImageTags.Primary) ? i.Id : (i.AlbumPrimaryImageTag ? i.AlbumId : null), i.RunTimeTicks ? Math.round(i.RunTimeTicks / 1e7) : null]),
         };
       }

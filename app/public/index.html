@@ -8,7 +8,7 @@
 <style>
 :root{--bg:#0b0d10;--panel:#15181d;--panel2:#1c2027;--line:#262b33;--text:#eef1f5;--dim:#9aa2b0;--accent:#3ee0c5;--on-accent:#04201b;--accent2:#1fb59c;--err:#ff6b6b;--ok:#5ad67d;--r:12px;--glow1:#1d5c55;--glow2:#2b2f5c;--glass:rgba(20,23,28,.55);--glass-strong:rgba(24,27,33,.78);--glass-line:rgba(255,255,255,.09);--glass-hi:rgba(255,255,255,.06);--blur:blur(28px) saturate(170%);transition:--accent 1s}
 @property --accent{syntax:'<color>';inherits:true;initial-value:#3ee0c5}
-*{box-sizing:border-box}html,body{margin:0;height:100%}
+*{box-sizing:border-box}[hidden]{display:none!important}html,body{margin:0;height:100%}
 body{background:var(--bg);overflow:hidden;color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 #glow{position:fixed;inset:-20%;z-index:-1;pointer-events:none;background:
@@ -124,6 +124,76 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .dtools{display:flex;gap:12px;font-size:13px;color:var(--dim);margin:-6px 0 10px}
 .dtools button{color:var(--accent);font-size:13px}
 
+/* ---------- nav icons (desktop: text pills) ---------- */
+nav button svg{display:none;width:22px;height:22px}
+nav button{display:flex;align-items:center;gap:6px}
+.mini-prog{display:none}
+.pagetitle{font-size:30px;font-weight:800;margin:4px 0 14px;letter-spacing:-.5px}
+.quick{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-bottom:8px}
+.qt{display:flex;align-items:center;gap:10px;height:56px;border-radius:8px;overflow:hidden;background:rgba(255,255,255,.07);cursor:pointer;font-weight:600;font-size:14px;transition:background .15s}
+.qt:hover{background:rgba(255,255,255,.13)}
+.qt i{width:56px;height:56px;flex:none;background:var(--panel2) center/cover}
+.qt span{overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;padding-right:8px}
+.shelfh{display:flex;align-items:baseline;justify-content:space-between;margin:22px 0 10px}
+.shelfh h3{margin:0;font-size:19px;font-weight:700}
+.shelfh button{color:var(--dim);font-size:13px}
+.arow{display:grid;grid-auto-flow:column;grid-auto-columns:120px;gap:16px;overflow-x:auto;padding-bottom:6px;scrollbar-width:none}
+.arow::-webkit-scrollbar,.hrow::-webkit-scrollbar{display:none}
+
+/* ---------- phone (cover screen / narrow) ---------- */
+html.phone header{padding:10px 16px;padding-top:calc(10px + env(safe-area-inset-top));gap:10px}
+html.phone .dots{display:none}
+html.phone header .search{display:none;order:3;flex-basis:100%;max-width:none}
+html.phone[data-view=search] header .search{display:block}
+html.phone[data-view=search] main{padding-top:calc(118px + env(safe-area-inset-top))!important}
+html.phone main{padding:calc(62px + env(safe-area-inset-top)) 14px calc(150px + env(safe-area-inset-bottom))!important}
+html.phone nav{position:fixed;left:0;right:0;bottom:0;z-index:25;height:calc(60px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);
+ justify-content:space-around;background:var(--glass-strong);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border-top:1px solid var(--glass-line)}
+html.phone nav button{flex-direction:column;gap:2px;font-size:11px;padding:6px 10px;border-radius:12px;background:none!important;box-shadow:none!important;flex:1}
+html.phone nav button svg{display:block}
+html.phone nav button.on{color:var(--accent)}
+html.phone footer{left:8px;right:8px;bottom:calc(66px + env(safe-area-inset-bottom));padding:6px 8px;border-radius:14px;grid-template-columns:minmax(0,1fr) auto;gap:8px;
+ background:color-mix(in srgb,var(--glow1) 55%,rgba(20,23,28,.85));overflow:hidden;touch-action:pan-y}
+html.phone footer .np .th{width:42px;height:42px}
+html.phone footer .ctl{width:auto}
+html.phone footer .ctl .b{gap:2px}
+html.phone footer #prev{display:none}
+html.phone footer .play{width:38px;height:38px;background:transparent;color:var(--text)}
+html.phone footer .play svg{width:24px;height:24px}
+html.phone footer .seek,html.phone footer .right{display:none}
+html.phone .mini-prog{display:block;position:absolute;left:10px;right:10px;bottom:2px;height:2px;border-radius:2px;background:rgba(255,255,255,.2);overflow:hidden}
+html.phone .mini-prog b{display:block;height:100%;width:0;background:#fff;transition:width .5s linear}
+html.phone .toast{bottom:calc(140px + env(safe-area-inset-bottom));left:12px;right:12px}
+html.phone .quick{grid-template-columns:1fr 1fr;gap:6px}
+html.phone .qt{height:52px;font-size:12.5px}html.phone .qt i{width:52px;height:52px}
+html.phone .arow{grid-auto-columns:104px;gap:12px}
+html.phone .row{padding:8px 4px}
+html.phone .row .th{width:50px;height:50px}
+html.phone .ib{width:40px;height:40px}
+
+/* ---------- unfolded Fold / tablet: rail + content + docked now playing ---------- */
+html.fold header{left:76px;right:320px;padding:12px 18px}
+html.fold header .logo,html.fold .dots{display:none}
+html.fold nav{position:fixed;left:0;top:0;bottom:0;width:76px;z-index:25;flex-direction:column;justify-content:flex-start;gap:6px;padding:calc(18px + env(safe-area-inset-top)) 6px 0;
+ background:var(--glass-strong);-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur);border-right:1px solid var(--glass-line)}
+html.fold nav button{flex-direction:column;gap:3px;font-size:10.5px;padding:10px 0;width:100%;border-radius:14px;background:none!important;box-shadow:none!important}
+html.fold nav button svg{display:block}
+html.fold nav button.on{color:var(--accent);background:rgba(255,255,255,.08)!important}
+html.fold .quick{grid-template-columns:1fr 1fr}
+html.fold main{margin-left:76px;margin-right:320px;padding:84px 22px 40px!important}
+html.fold footer{display:none}
+html.fold .toast{right:340px}
+html.fold #fs{left:auto;width:320px;transform:none!important;border-left:1px solid var(--glass-line);z-index:15}
+html.fold #fs .top{display:none}
+html.fold #fs .body{display:flex!important;padding:calc(22px + env(safe-area-inset-top)) 18px 20px;overflow:auto}
+html.fold #fs .left{display:contents}
+html.fold #fs .cover{width:240px!important}
+html.fold #fs .meta,html.fold #fs .fseek,html.fold #fs .fctl{width:100%!important}
+html.fold #fs .ft{font-size:18px}html.fold #fs .fa{font-size:14px}
+html.fold #fs .fctl{padding:4px 6px}html.fold #fs .fctl .big{width:54px;height:54px}html.fold #fs .fctl .ib{width:40px;height:40px}
+html.fold #fs .upnext{width:100%!important;margin-top:20px;max-height:none;background:rgba(0,0,0,.2)}
+html.fold #fs.empty .body{justify-content:center;align-items:center;color:#ffffffaa}
+
 /* ---------- Android app ---------- */
 .in-app .right input[type=range],.in-app .right>svg{display:none}
 .in-app #appset{margin-left:4px}
@@ -215,9 +285,10 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 <header>
   <div class="logo">Tide<b>fin</b></div>
   <nav>
-    <button data-v="library" class="on">Library</button>
-    <button data-v="search">Search</button>
-    <button data-v="downloads">Downloads</button>
+    <button data-v="home" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></button>
+    <button data-v="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search</span></button>
+    <button data-v="library"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16M9 4v16M14 5l5 15"/></svg><span>Library</span></button>
+    <button data-v="downloads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19h14"/></svg><span>Downloads</span></button>
   </nav>
   <div class="search"><input id="q" type="search" placeholder="Search your library and Tidal…" autocomplete="off"></div>
   <button class="ib" id="appset" title="App settings" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
@@ -225,6 +296,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 </header>
 <main id="main"></main>
 <footer>
+  <div class="mini-prog"><b id="mini-prog"></b></div>
   <div class="np"><div class="th" id="np-th"></div><div style="min-width:0"><div class="t" id="np-t">Nothing playing</div><div class="a" id="np-a"></div></div></div>
   <div class="ctl">
     <div class="b">
@@ -266,6 +338,21 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 <script>
 const $ = (s, el = document) => el.querySelector(s);
 const main = $('#main');
+// Layout: phone (narrow), fold (unfolded Z Fold / tablet touch screen), desktop.
+function setLayout() {
+  const w = window.innerWidth, touch = matchMedia('(pointer:coarse)').matches;
+  const mode = w < 700 ? 'phone' : (touch && w < 1300 ? 'fold' : 'desktop');
+  const el = document.documentElement;
+  ['phone', 'fold', 'desktop'].forEach((m) => el.classList.toggle(m, m === mode));
+  // the tab bar / side rail must live outside the glass header (backdrop-filter traps fixed children)
+  const nav = document.querySelector('nav'), header = document.querySelector('header');
+  if (mode === 'desktop') { if (nav.parentElement !== header) header.insertBefore(nav, header.querySelector('.search')); }
+  else if (nav.parentElement === header) document.body.appendChild(nav);
+  const fsEl = document.getElementById('fs');
+  if (fsEl && mode === 'fold') { fsEl.classList.remove('open'); if (window.__tfReady) renderFs(); }
+}
+setLayout();
+window.addEventListener('resize', setLayout);
 // Inside the Android app, playback runs in the phone's native player (background, lock screen, Bluetooth, car).
 const NATIVE = (window.TidefinNative && window.TidefinNative.isNative && window.TidefinNative.isNative()) ? window.TidefinNative : null;
 function makeNativeAudio() {
@@ -326,17 +413,23 @@ function toast(msg, err) { const t = $('#toast'); t.textContent = msg; t.classNa
 // ---------- what's already in the library ----------
 const nkey = (artist, title) => normT(String(artist || '').split(/,|&| feat\.? | ft\.? /i)[0]) + '|' + normT(title);
 function normT(x) { return String(x || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/\(.*?\)|\[.*?\]/g, '').replace(/ - .*(remaster|version|edition|deluxe|live|mix).*$/i, '').replace(/[^a-z0-9]/g, ''); }
-let libAlbums = new Set(), libTracks = new Set(), libTrackMap = new Map();
+let libAlbums = new Map(), libTracks = new Set(), libTrackMap = new Map(); // libAlbums: key -> songs you have
 async function loadLibIndex(fresh) {
   try {
     const r = await api('/api/library/index' + (fresh ? '?fresh=1' : ''));
-    libAlbums = new Set(r.albums.map(([a, t]) => nkey(a, t)));
+    libAlbums = new Map(r.albums.map(([a, t, n]) => [nkey(a, t), n || 0]));
     libTracks = new Set(r.tracks.map(([a, t]) => nkey(a, t)));
     libTrackMap = new Map(r.tracks.filter((x) => x[2]).map(([a, t, id, album, img, dur]) => [nkey(a, t), { id, album, imageId: img, duration: dur }]));
     refreshDlButtons();
   } catch {}
 }
-const albumInLib = (a) => libAlbums.has(nkey(a.artist, a.title));
+// Owned = you have (nearly) every song. A single downloaded song doesn't count as the album.
+const albumInLib = (a) => {
+  const have = libAlbums.get(nkey(a.artist, a.title));
+  if (have === undefined) return false;
+  if (!a.tracks) return have > 3;          // unknown size: need more than a few songs
+  return have >= Math.max(1, Math.floor(a.tracks * 0.8));
+};
 const trackInLib = (t) => libTracks.has(nkey(t.artist, t.title));
 // mark Tidal items you already own as done (green check)
 function markOwned(list, kind) {
@@ -447,7 +540,21 @@ function loadCurrent() {
   audio.play().catch(() => {});
   updateNowUi(t);
 }
+function rememberPlayed(t) {
+  try {
+    const rec = JSON.parse(localStorage.tfRecent || '[]');
+    const key = t.albumId ? (t.src + ':' + t.albumId) : null;
+    if (!key) return;
+    const item = { key, src: t.src, id: t.albumId, title: t.album || t.title, artist: t.artist, cover: t.cover || null, imageId: t.imageId || (t.src === 'jf' ? t.albumId : null) };
+    const next = [item, ...rec.filter((x) => x.key !== key)].slice(0, 24);
+    localStorage.tfRecent = JSON.stringify(next);
+    const ar = JSON.parse(localStorage.tfRecentArtists || '[]');
+    const a1 = String(t.artist || '').split(',')[0].trim();
+    if (a1) localStorage.tfRecentArtists = JSON.stringify([a1, ...ar.filter((x) => x !== a1)].slice(0, 20));
+  } catch {}
+}
 function updateNowUi(t) {
+  rememberPlayed(t);
   $('#np-t').innerHTML = esc(t.title) + (t.src === 'tidal' ? `<span class="src">${previewMode ? 'PREVIEW' : 'LOCAL'}</span>` : '');
   $('#np-a').textContent = [t.artist, t.album].filter(Boolean).join(' — ');
   $('#np-th').style.backgroundImage = t.src === 'tidal' ? bg(t.cover) : jfImg(t.imageId, 120);
@@ -483,7 +590,7 @@ audio.ontimeupdate = () => {
   const dur = previewMode ? Math.min(PREVIEW_SECS, audio.duration || PREVIEW_SECS) : audio.duration;
   const c = fmt(audio.currentTime), d = fmt(dur);
   $('#cur').textContent = c; $('#dur').textContent = d; $('#fs-cur').textContent = c; $('#fs-dur').textContent = d;
-  if (!seeking && dur) { const v = audio.currentTime / dur * 1000; $('#seek').value = v; $('#fs-seek').value = v; }
+  if (!seeking && dur) { const v = audio.currentTime / dur * 1000; $('#seek').value = v; $('#fs-seek').value = v; $('#mini-prog').style.width = (v / 10) + '%'; }
 };
 let seeking = false;
 $('#seek').oninput = () => seeking = true;
@@ -547,7 +654,8 @@ function applyColors(url) {
 }
 function renderFs() {
   const t = queue[qi];
-  if (!t) return;
+  fs.classList.toggle('empty', !t);
+  if (!t) { if (document.documentElement.classList.contains('fold')) { $('#fs-t').textContent = 'Nothing playing'; $('#fs-a').textContent = ''; $('#fs-q').innerHTML = '<div class="none">Pick something to play</div>'; } return; }
   const big = coverUrl(t, 800);
   $('#fs-cover').style.backgroundImage = big ? `url('${big}')` : 'none';
   $('#fs-t').innerHTML = esc(t.title) + (t.explicit ? '<span class="e">E</span>' : '');
@@ -571,6 +679,7 @@ function renderFs() {
   setPP();
 }
 function openFs() {
+  if (document.documentElement.classList.contains('fold')) return; // docked on the side already
   if (!queue[qi] || fs.classList.contains('open')) return;
   fs.classList.add('open'); fs.setAttribute('aria-hidden', 'false');
   renderFs(); applyColors(coverUrl(queue[qi], 100));
@@ -583,7 +692,21 @@ function closeFs(fromPop) {
 }
 window.addEventListener('popstate', () => closeFs(true));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFs(); });
-$('.np').addEventListener('click', openFs);
+$('.np').addEventListener('click', (e) => { if (swiped) { swiped = false; return; } openFs(); });
+let swX = null, swY = 0, swiped = false;
+const footerEl = document.querySelector('footer');
+footerEl.addEventListener('touchstart', (e) => { swX = e.touches[0].clientX; swY = e.touches[0].clientY; }, { passive: true });
+footerEl.addEventListener('touchmove', (e) => {
+  if (swX === null) return;
+  const dx = e.touches[0].clientX - swX;
+  if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(e.touches[0].clientY - swY)) footerEl.querySelector('.np').style.transform = `translateX(${dx * 0.6}px)`;
+}, { passive: true });
+footerEl.addEventListener('touchend', (e) => {
+  if (swX === null) return;
+  const dx = e.changedTouches[0].clientX - swX; swX = null;
+  const np = footerEl.querySelector('.np'); np.style.transition = 'transform .2s'; np.style.transform = ''; setTimeout(() => np.style.transition = '', 220);
+  if (Math.abs(dx) > 70) { swiped = true; dx < 0 ? nextTrack(false) : $('#prev').onclick(); setTimeout(() => swiped = false, 400); }
+});
 $('#fs-pp').onclick = () => $('#pp').onclick();
 $('#fs-next').onclick = () => nextTrack(false);
 $('#fs-prev').onclick = () => $('#prev').onclick();
@@ -740,9 +863,11 @@ let view = { name: 'library' }, history_ = [];
 function go(name, args = {}, push = true) {
   if (push) history_.push(view);
   view = { name, ...args };
+  document.documentElement.dataset.view = name;
+  if (name === 'search' && document.documentElement.classList.contains('phone') && !$('#q').value) setTimeout(() => $('#q').focus(), 50);
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.v === name || (['album', 'artist', 'genre'].includes(name) && b.dataset.v === 'library') || (name === 'tidalAlbum' && b.dataset.v === 'search')));
   main.scrollTop = 0;
-  ({ library: renderLibrary, search: renderSearch, downloads: renderDownloads, album: renderAlbum, tidalAlbum: renderTidalAlbum, artist: renderArtist, genre: renderGenre })[name]();
+  ({ home: renderHome, library: renderLibrary, search: renderSearch, downloads: renderDownloads, album: renderAlbum, tidalAlbum: renderTidalAlbum, artist: renderArtist, genre: renderGenre })[name]();
 }
 const backBtn = () => history_.length ? '<button class="back" id="back">← Back</button>' : '';
 const bindBack = () => { const b = $('#back'); if (b) b.onclick = () => { const v = history_.pop(); go(v.name, v, false); }; };
@@ -864,7 +989,7 @@ function studioAlbums(albums) {
 }
 function discographyPicker(artistName, albums, ownedTitles) {
   const list = studioAlbums(albums);
-  const owned = (x) => ownedTitles.has(normTitle(x.title)) || albumInLib(x) || ['done', 'queued'].includes(dlState.get(String(x.id)));
+  const owned = (x) => albumInLib({ ...x, artist: x.artist || artistName }) || ['done', 'queued'].includes(dlState.get(String(x.id)));
   const missing = list.filter((x) => !owned(x));
   if (!list.length) return toast('No studio albums found on Tidal for ' + artistName, true);
   const bgEl = document.createElement('div'); bgEl.className = 'modal-bg';
@@ -937,7 +1062,7 @@ async function renderArtist() {
     api(`/api/tidal/artist?name=${encodeURIComponent(a.name)}`).then((t) => {
       if (view.name !== 'artist' || view.id !== viewId) return;
       const owned = new Set(a.albums.map((x) => normTitle(x.title)));
-      const missing = t.albums.filter((x) => !owned.has(normTitle(x.title)));
+      const missing = t.albums.filter((x) => !albumInLib({ ...x, artist: x.artist || a.name }));
       const box = $('#atidal');
       const dbtn = $('#adisco');
       if (dbtn && t.artist) { dbtn.disabled = false; dbtn.onclick = () => discographyPicker(a.name, t.albums, owned); }
@@ -949,6 +1074,45 @@ async function renderArtist() {
       bindCards(box, missing, 'tidal');
     }).catch((e) => { const box = $('#atidal'); if (box) box.innerHTML = '<h2>More on Tidal</h2>' + errBox(e); });
   } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  return h < 5 ? 'Good night' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
+async function renderHome() {
+  let recent = []; try { recent = JSON.parse(localStorage.tfRecent || '[]'); } catch {}
+  main.innerHTML = `<div class="pagetitle">${greeting()}</div><div id="hq"></div>
+    <div class="shelfh"><h3>Recently added</h3><button id="h-all">See all</button></div><div id="hadd"><div class="empty">Loading…</div></div>
+    <div id="hnew"></div>
+    <div class="shelfh"><h3>Your artists</h3></div><div id="hart"></div>`;
+  $('#h-all').onclick = () => { libTab = 'albums'; libSort = 'recent'; history_ = []; go('library', {}, false); };
+  const quickTile = (x, i) => `<div class="qt" data-qi="${i}"><i style="background-image:${x.src === 'tidal' ? bg(x.cover) : jfImg(x.imageId || x.id, 120)}"></i><span>${esc(x.title)}</span></div>`;
+  const drawQuick = (list) => {
+    if (!list.length) { $('#hq').innerHTML = ''; return; }
+    $('#hq').innerHTML = `<div class="quick">${list.slice(0, document.documentElement.classList.contains('phone') ? 6 : 8).map(quickTile).join('')}</div>`;
+    $('#hq').querySelectorAll('[data-qi]').forEach((el) => el.onclick = () => { const x = list[+el.dataset.qi]; go(x.src === 'tidal' ? 'tidalAlbum' : 'album', { id: x.id }); });
+  };
+  drawQuick(recent);
+  try {
+    const [{ albums }, { artists }] = await Promise.all([api('/api/library/albums?sort=recent'), api('/api/library/artists')]);
+    if (view.name !== 'home') return;
+    if (!recent.length) drawQuick(albums.map((a) => ({ src: 'jf', id: a.id, title: a.title, imageId: a.hasImage ? a.id : null })));
+    $('#hadd').innerHTML = albumCards(albums.slice(0, 20), 'jf', true); bindCards($('#hadd'), albums.slice(0, 20), 'jf');
+    // artists: recently played first, then the rest of the library
+    let ra = []; try { ra = JSON.parse(localStorage.tfRecentArtists || '[]'); } catch {}
+    const byName = new Map(artists.map((a) => [a.name.toLowerCase(), a]));
+    const ordered = [...ra.map((n) => byName.get(n.toLowerCase())).filter(Boolean), ...artists].filter((a, i, arr) => arr.indexOf(a) === i).slice(0, 20);
+    $('#hart').innerHTML = `<div class="arow">${ordered.map((a, i) => `<div class="acard" data-art="${i}"><div class="pic" style="${a.hasImage ? `background-image:${jfImg(a.id, 300)}` : ''}">${a.hasImage ? '' : initial(a.name)}</div><div class="n">${esc(a.name)}</div></div>`).join('')}</div>`;
+    $('#hart').querySelectorAll('[data-art]').forEach((c) => c.onclick = () => go('artist', { id: ordered[+c.dataset.art].id }));
+    // new releases from your artists (Tidal), loads in the background
+    const names = ordered.slice(0, 8).map((a) => a.name);
+    api('/api/home/new?artists=' + encodeURIComponent(names.join('|'))).then((r) => {
+      if (view.name !== 'home' || !r.albums.length) return;
+      $('#hnew').innerHTML = `<div class="shelfh"><h3>New from your artists</h3></div>` + albumCards(r.albums.map((x) => ({ ...x, year: [x.type === 'EP' ? 'EP' : '', x.year].filter(Boolean).join(' · ') })), 'tidal', true);
+      bindCards($('#hnew'), r.albums, 'tidal');
+    }).catch(() => {});
+  } catch (e) { $('#hadd').innerHTML = errBox(e); }
 }
 
 async function renderAlbums() {
@@ -1005,7 +1169,7 @@ async function renderTidalAlbum() {
     bindBack(); bindRows($('#tr'), list);
     $('#pa').onclick = () => list.length && playList(list, 0);
     $('#da').onclick = () => download('album', a.id, a.title, a.artist);
-    if (albumInLib(a) || dlState.get(String(a.id)) === 'done') { const b = $('#da'); b.innerHTML = ICK.replace('<svg', '<svg width="16"') + ' In library'; b.style.color = 'var(--ok)'; b.title = 'Already in your library — click to download again'; }
+    if (albumInLib({ ...a, tracks: a.tracks.length }) || dlState.get(String(a.id)) === 'done') { const b = $('#da'); b.innerHTML = ICK.replace('<svg', '<svg width="16"') + ' In library'; b.style.color = 'var(--ok)'; b.title = 'Already in your library — click to download again'; }
   } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }
 }
 
@@ -1067,7 +1231,8 @@ if (NATIVE) {
   document.documentElement.classList.add('in-app');
   const g = $('#appset'); g.hidden = false; g.onclick = () => NATIVE.openSettings();
 }
-go('library', {}, false);
+window.__tfReady = true; setLayout();
+go('home', {}, false);
 pollQueue();
 </script>
 </body>
