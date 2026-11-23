@@ -173,12 +173,17 @@ async function tidalByIds(type, ids, includes, fallbackIncludes) {
 async function tidalSearch(q) {
   // GET /searchResults?filter[query]=… returns one searchResults resource whose
   // relationships hold the ordered track/album ids.
-  const sDoc = await tidal('/searchResults', [
-    ['filter[query]', q], ['explicitFilter', 'INCLUDE'], ['include', 'tracks'], ['include', 'albums'],
-  ]);
-  const sRes = Array.isArray(sDoc.data) ? sDoc.data[0] : sDoc.data;
-  const trackIds = relIds(sRes, 'tracks').filter((d) => d.type === 'tracks').map((d) => d.id).slice(0, 20);
-  const albumIds = relIds(sRes, 'albums').filter((d) => d.type === 'albums').map((d) => d.id).slice(0, 20);
+  // One request per type: Tidal only fills the first relationship when both are requested together.
+  const searchIds = async (type) => {
+    const doc = await tidal('/searchResults', [['filter[query]', q], ['explicitFilter', 'INCLUDE'], ['include', type]]);
+    const res = Array.isArray(doc.data) ? doc.data[0] : doc.data;
+    let ids = relIds(res, type).filter((d) => d.type === type).map((d) => d.id);
+    if (!ids.length) ids = (doc.included || []).filter((d) => d.type === type).map((d) => d.id);
+    return ids;
+  };
+  const [tIds, aIds] = await Promise.all([searchIds('tracks'), searchIds('albums')]);
+  const trackIds = tIds.slice(0, 20);
+  const albumIds = aIds.slice(0, 20);
   const [tDoc, aDoc] = await Promise.all([
     tidalByIds('tracks', trackIds, ['artists', 'albums', 'albums.coverArt'], ['artists', 'albums']),
     tidalByIds('albums', albumIds, ['artists', 'coverArt'], ['artists']),
