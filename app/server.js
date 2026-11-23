@@ -178,7 +178,7 @@ async function tidalSearch(q) {
   ]);
   const sRes = Array.isArray(sDoc.data) ? sDoc.data[0] : sDoc.data;
   const trackIds = relIds(sRes, 'tracks').filter((d) => d.type === 'tracks').map((d) => d.id).slice(0, 20);
-  const albumIds = relIds(sRes, 'albums').filter((d) => d.type === 'albums').map((d) => d.id).slice(0, 12);
+  const albumIds = relIds(sRes, 'albums').filter((d) => d.type === 'albums').map((d) => d.id).slice(0, 20);
   const [tDoc, aDoc] = await Promise.all([
     tidalByIds('tracks', trackIds, ['artists', 'albums', 'albums.coverArt'], ['artists', 'albums']),
     tidalByIds('albums', albumIds, ['artists', 'coverArt'], ['artists']),

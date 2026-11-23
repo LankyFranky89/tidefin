@@ -62,6 +62,16 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .src{font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:var(--panel2);color:var(--accent);margin-left:6px}
 .toast{position:fixed;right:20px;bottom:100px;background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:8px;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none;max-width:360px}
 .toast.show{opacity:1;transform:none}.toast.err{border-color:var(--err)}
+/* ---------- album rows + download on cover ---------- */
+.hrow{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,170px);gap:16px;overflow-x:auto;padding-bottom:10px;scroll-snap-type:x proximity;scrollbar-width:thin}
+.hrow .card{scroll-snap-align:start}
+.cdlw{position:absolute;right:8px;bottom:8px}
+.cdlw .ib{background:#000c;color:#fff;width:40px;height:40px;box-shadow:0 2px 8px #0008}
+.cdlw .ib:hover{background:var(--accent);color:#04201b}
+.cdlw .ib.queued{color:var(--accent)}.cdlw .ib.done{color:var(--ok)}.cdlw .ib.err{color:var(--err)}
+.sub{font-size:13px;color:var(--dim);margin:18px 0 10px;font-weight:600;text-transform:uppercase;letter-spacing:.8px}
+@media(max-width:760px){.hrow{grid-auto-columns:minmax(128px,140px);gap:12px}}
+
 /* ---------- library sections ---------- */
 .ltabs{display:flex;gap:8px;margin:4px 0 6px;flex-wrap:wrap;align-items:center}
 .ltabs button{padding:8px 16px;border-radius:999px;background:var(--panel2);color:var(--dim);font-weight:600}
@@ -442,16 +452,17 @@ function bindRows(el, list) {
   el.querySelectorAll('[data-dl][data-i]').forEach((b) => b.onclick = () => { const t = list[+b.dataset.i]; download('track', t.id, t.title, t.artist); });
   markPlaying();
 }
-function albumCards(list, src) {
+function albumCards(list, src, row = false) {
   if (!list.length) return '<div class="empty">No albums</div>';
-  return '<div class="grid">' + list.map((a, i) => `
+  return `<div class="${row ? 'hrow' : 'grid'}">` + list.map((a, i) => `
     <div class="card" data-alb="${i}">
-      <div class="art" style="background-image:${src === 'tidal' ? bg(a.cover) : (a.hasImage ? jfImg(a.id) : 'none')}">${src === 'tidal' ? '<span class="badge">TIDAL</span>' : ''}</div>
+      <div class="art" style="background-image:${src === 'tidal' ? bg(a.cover) : (a.hasImage ? jfImg(a.id) : 'none')}">${src === 'tidal' ? `<span class="badge">TIDAL</span><span class="cdlw"><button class="${dlClass(a.id)}" data-dl="${esc(a.id)}" data-dla="${i}" title="Download album">${dlIcon(a.id)}</button></span>` : ''}</div>
       <div class="t">${esc(a.title)}</div><div class="a">${esc(a.artist)}${a.year ? ' · ' + a.year : ''}</div>
     </div>`).join('') + '</div>';
 }
 function bindCards(el, list, src) {
   el.querySelectorAll('[data-alb]').forEach((c) => c.onclick = () => go(src === 'tidal' ? 'tidalAlbum' : 'album', { id: list[+c.dataset.alb].id }));
+  el.querySelectorAll('[data-dla]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); const a = list[+b.dataset.dla]; download('album', a.id, a.title, a.artist); });
 }
 
 let view = { name: 'library' }, history_ = [];
@@ -680,14 +691,15 @@ async function renderSearch() {
     if (q !== lastQ || view.name !== 'search') return;
     const list = r.tracks.map((t) => ({ ...t, src: 'jf' }));
     const el = $('#lib');
-    el.innerHTML = (r.albums.length ? albumCards(r.albums, 'jf') + '<div style="height:16px"></div>' : '') + (list.length ? trackRows(list) : (r.albums.length ? '' : '<div class="empty">Nothing in your library</div>'));
+    el.innerHTML = (r.albums.length ? '<div class="sub">Albums</div>' + albumCards(r.albums, 'jf', true) : '') + (list.length ? '<div class="sub">Songs</div>' + trackRows(list) : (r.albums.length ? '' : '<div class="empty">Nothing in your library</div>'));
     bindCards(el, r.albums, 'jf'); bindRows(el, list);
   }).catch((e) => { if ($('#lib')) $('#lib').innerHTML = errBox(e); });
   api(`/api/tidal/search?q=${encodeURIComponent(q)}`).then((r) => {
     if (q !== lastQ || view.name !== 'search') return;
     const list = r.tracks.map((t) => ({ ...t, src: 'tidal' }));
     const el = $('#tid');
-    el.innerHTML = trackRows(list) + (r.albums.length ? '<h2 style="font-size:13px">Tidal albums</h2>' + albumCards(r.albums, 'tidal') : '');
+    el.innerHTML = (r.albums.length ? '<div class="sub">Albums · ↓ downloads the whole album</div>' + albumCards(r.albums, 'tidal', true) : '') +
+      (list.length ? '<div class="sub">Songs</div>' + trackRows(list) : '') + (!list.length && !r.albums.length ? '<div class="empty">Nothing found on Tidal</div>' : '');
     bindRows(el, list); bindCards(el, r.albums, 'tidal');
   }).catch((e) => { if ($('#tid')) $('#tid').innerHTML = errBox(e); });
 }
