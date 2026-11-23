@@ -83,6 +83,7 @@ const mapJfArtist = (i) => ({ id: i.Id, name: i.Name, hasImage: !!(i.ImageTags &
 // A Jellyfin user is needed for per-user data such as play counts (top songs).
 let jfUserId = null;
 let libIndexCache = null;
+const lyricsCache = new Map();
 const artistAlbumCache = new Map(); // artist name -> {at, data}
 const previewCache = new Map(); // tidal id -> preview url (or null)
 async function jfUser() {
@@ -383,6 +384,31 @@ const server = http.createServer(async (req, res) => {
       }
       console.log(new Date().toISOString(), 'deleted', b.type, id, `(${ids.length} item(s))`);
       return send(res, 200, { ok: true, deleted: ids.length });
+    }
+    if (p === '/api/lyrics') {
+      // Synced lyrics from LRCLIB (free, open lyrics database).
+      const artist = (q.get('artist') || '').split(',')[0].trim();
+      const title = (q.get('title') || '').replace(/\s*[\(\[](feat|ft|with)\.?[^\)\]]*[\)\]]/ig, '').trim();
+      const album = q.get('album') || '', dur = Math.round(+q.get('duration') || 0);
+      const key = [artist, title, album, dur].join('|').toLowerCase();
+      if (lyricsCache.has(key)) return send(res, 200, lyricsCache.get(key));
+      const H = { 'User-Agent': 'Tidefin/1.0 (https://github.com/LankyFranky89/tidefin)' };
+      let hit = null;
+      try {
+        const qs = new URLSearchParams({ artist_name: artist, track_name: title, album_name: album });
+        if (dur) qs.set('duration', String(dur));
+        const r = await fetch('https://lrclib.net/api/get?' + qs, { headers: H });
+        if (r.ok) hit = await r.json();
+        if (!hit || (!hit.syncedLyrics && !hit.plainLyrics)) {
+          const r2 = await fetch('https://lrclib.net/api/search?' + new URLSearchParams({ track_name: title, artist_name: artist }), { headers: H });
+          const list = r2.ok ? await r2.json() : [];
+          hit = list.find((x) => x.syncedLyrics) || list[0] || null;
+        }
+      } catch (e) { console.error('lyrics lookup failed', e.message); }
+      const out = { synced: (hit && hit.syncedLyrics) || null, plain: (hit && hit.plainLyrics) || null, instrumental: !!(hit && hit.instrumental) };
+      if (lyricsCache.size > 500) lyricsCache.clear();
+      lyricsCache.set(key, out);
+      return send(res, 200, out);
     }
     if (p === '/api/home/new') {
       // Tidal releases from the last 12 months by artists you have, that you don't own yet.

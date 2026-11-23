@@ -124,6 +124,20 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .dtools{display:flex;gap:12px;font-size:13px;color:var(--dim);margin:-6px 0 10px}
 .dtools button{color:var(--accent);font-size:13px}
 
+/* ---------- lyrics ---------- */
+#fs .fstabs{display:flex;gap:6px;margin-bottom:10px}
+#fs .fstabs button{padding:6px 14px;border-radius:999px;font-size:13px;font-weight:600;color:#ffffffaa;background:rgba(255,255,255,.06)}
+#fs .fstabs button.on{background:rgba(255,255,255,.9);color:#111}
+#fs-ly{max-height:52vh;overflow:auto;scroll-behavior:smooth;padding:4px 2px 30vh;mask-image:linear-gradient(transparent 0,#000 8%,#000 80%,transparent 100%)}
+#fs-ly .ln{font-size:22px;font-weight:700;line-height:1.35;margin:0 0 14px;color:#ffffff55;cursor:pointer;transition:color .3s,transform .3s;transform-origin:left}
+#fs-ly .ln.on{color:#fff;transform:scale(1.03)}
+#fs-ly .ln.past{color:#ffffff88}
+#fs-ly.plain .ln{color:#ffffffdd;font-size:18px;font-weight:600;cursor:default}
+#fs-ly .none{font-size:15px}
+@media(min-width:900px) and (min-aspect-ratio:4/3){#fs-ly{max-height:64vh}}
+html.phone #fs-ly .ln{font-size:20px}
+html.fold #fs-ly{max-height:none}html.fold #fs-ly .ln{font-size:17px}
+
 /* ---------- nav icons (desktop: text pills) ---------- */
 nav button svg{display:none;width:22px;height:22px}
 nav button{display:flex;align-items:center;gap:6px}
@@ -330,7 +344,7 @@ html.fold #fs.empty .body{justify-content:center;align-items:center;color:#fffff
         <button class="ib sm" id="fs-rep" title="Repeat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></svg></button>
       </div>
     </div>
-    <div class="upnext"><h3>Up next</h3><div id="fs-q"></div></div>
+    <div class="upnext"><div class="fstabs"><button data-ft="q" class="on">Up next</button><button data-ft="ly">Lyrics</button></div><div id="fs-q"></div><div id="fs-ly" hidden></div></div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
@@ -589,6 +603,7 @@ audio.ontimeupdate = () => {
   if (!NATIVE && previewMode && audio.currentTime >= PREVIEW_SECS) { audio.pause(); nextTrack(true); return; }
   const dur = previewMode ? Math.min(PREVIEW_SECS, audio.duration || PREVIEW_SECS) : audio.duration;
   const c = fmt(audio.currentTime), d = fmt(dur);
+  syncLyrics();
   $('#cur').textContent = c; $('#dur').textContent = d; $('#fs-cur').textContent = c; $('#fs-dur').textContent = d;
   if (!seeking && dur) { const v = audio.currentTime / dur * 1000; $('#seek').value = v; $('#fs-seek').value = v; $('#mini-prog').style.width = (v / 10) + '%'; }
 };
@@ -652,6 +667,54 @@ function applyColors(url) {
   };
   img.src = url;
 }
+// ---------- lyrics ----------
+let fsTab = 'q', lyKey = '', lyLines = [], lyIdx = -1, lyUserScroll = 0;
+function parseLrc(txt) {
+  const out = [];
+  for (const raw of txt.split(/\r?\n/)) {
+    const tags = [...raw.matchAll(/\[(\d+):(\d+(?:\.\d+)?)\]/g)];
+    const text = raw.replace(/\[[^\]]*\]/g, '').trim();
+    for (const m of tags) out.push({ t: (+m[1]) * 60 + (+m[2]), text });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+async function loadLyrics(t) {
+  const key = (t.src + ':' + t.id);
+  if (key === lyKey) return;
+  lyKey = key; lyLines = []; lyIdx = -1;
+  const box = $('#fs-ly'); box.className = ''; box.innerHTML = '<div class="none">Looking for lyrics…</div>';
+  try {
+    const r = await api('/api/lyrics?' + new URLSearchParams({ artist: t.artist || '', title: t.title || '', album: t.album || '', duration: t.duration || '' }));
+    if (lyKey !== key) return;
+    if (r.synced) {
+      lyLines = parseLrc(r.synced);
+      box.innerHTML = lyLines.map((l, i) => `<p class="ln" data-li="${i}">${esc(l.text) || '♪'}</p>`).join('');
+      box.querySelectorAll('[data-li]').forEach((p) => p.onclick = () => { audio.currentTime = lyLines[+p.dataset.li].t; });
+      syncLyrics();
+    } else if (r.plain) {
+      box.className = 'plain';
+      box.innerHTML = r.plain.split(/\r?\n/).map((l) => `<p class="ln">${esc(l) || '&nbsp;'}</p>`).join('');
+    } else box.innerHTML = `<div class="none">${r.instrumental ? 'Instrumental' : 'No lyrics found for this song'}</div>`;
+  } catch (e) { if (lyKey === key) box.innerHTML = '<div class="none">Couldn\'t load lyrics</div>'; }
+}
+function syncLyrics() {
+  if (!lyLines.length || fsTab !== 'ly') return;
+  const now = audio.currentTime + 0.25;
+  let i = -1; for (let k = 0; k < lyLines.length; k++) { if (lyLines[k].t <= now) i = k; else break; }
+  if (i === lyIdx) return;
+  lyIdx = i;
+  const box = $('#fs-ly');
+  box.querySelectorAll('.ln').forEach((p, k) => { p.classList.toggle('on', k === i); p.classList.toggle('past', k < i); });
+  const cur = box.querySelector('.ln.on');
+  if (cur && Date.now() - lyUserScroll > 3000) box.scrollTop = cur.offsetTop - box.clientHeight * 0.3;
+}
+function setFsTab(tab) {
+  fsTab = tab;
+  document.querySelectorAll('#fs [data-ft]').forEach((b) => b.classList.toggle('on', b.dataset.ft === tab));
+  $('#fs-q').hidden = tab !== 'q'; $('#fs-ly').hidden = tab !== 'ly';
+  if (tab === 'ly' && queue[qi]) { loadLyrics(queue[qi]); lyIdx = -1; syncLyrics(); }
+}
+
 function renderFs() {
   const t = queue[qi];
   fs.classList.toggle('empty', !t);
@@ -666,6 +729,7 @@ function renderFs() {
   const dl = $('#fs-dl');
   if (t.src === 'tidal') { dl.hidden = false; dl.dataset.dl = t.id; dl.className = dlClass(t.id); dl.innerHTML = dlIcon(t.id); dl.onclick = () => download('track', t.id, t.title, t.artist); }
   else dl.hidden = true;
+  if (fsTab === 'ly') loadLyrics(t);
   $('#fs-shuf').classList.toggle('on', shuffle);
   const rb = $('#fs-rep'); rb.classList.toggle('on', repeat !== 'off'); rb.classList.toggle('rep1', repeat === 'one');
   rb.title = { off: 'Repeat: off', all: 'Repeat: all', one: 'Repeat: one' }[repeat];
@@ -708,6 +772,15 @@ footerEl.addEventListener('touchend', (e) => {
   if (Math.abs(dx) > 70) { swiped = true; dx < 0 ? nextTrack(false) : $('#prev').onclick(); setTimeout(() => swiped = false, 400); }
 });
 $('#fs-pp').onclick = () => $('#pp').onclick();
+document.querySelectorAll('#fs [data-ft]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); setFsTab(b.dataset.ft); });
+$('#fs-ly').addEventListener('wheel', () => { lyUserScroll = Date.now(); }, { passive: true });
+$('#fs-ly').addEventListener('touchmove', () => { lyUserScroll = Date.now(); }, { passive: true });
+// click an empty spot of the big player to drop it down again
+fs.addEventListener('click', (e) => {
+  if (document.documentElement.classList.contains('fold')) return;
+  if (e.target.closest('button, input, .cover, .meta, .fseek, .fctl, .upnext, .qi, .ln')) return;
+  closeFs();
+});
 $('#fs-next').onclick = () => nextTrack(false);
 $('#fs-prev').onclick = () => $('#prev').onclick();
 $('#fs-shuf').onclick = () => setShuffle(!shuffle);
