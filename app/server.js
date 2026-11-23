@@ -72,11 +72,24 @@ async function jf(pathAndQuery, opts = {}) {
   return t ? JSON.parse(t) : {};
 }
 
-const jfFields = 'Fields=PrimaryImageAspectRatio,ProductionYear,ChildCount,DateCreated';
+const jfFields = 'Fields=PrimaryImageAspectRatio,ProductionYear,ChildCount,RecursiveItemCount,DateCreated,Genres';
 const mapJfAlbum = (i) => ({
   id: i.Id, title: i.Name, artist: i.AlbumArtist || (i.AlbumArtists?.[0]?.Name) || (i.Artists || []).join(', '),
   year: i.ProductionYear || null, hasImage: !!(i.ImageTags && i.ImageTags.Primary),
+  tracks: i.ChildCount || i.RecursiveItemCount || null,
 });
+const mapJfArtist = (i) => ({ id: i.Id, name: i.Name, hasImage: !!(i.ImageTags && i.ImageTags.Primary) });
+
+// A Jellyfin user is needed for per-user data such as play counts (top songs).
+let jfUserId = null;
+async function jfUser() {
+  if (jfUserId) return jfUserId;
+  const users = await jf('/Users');
+  const want = (process.env.JELLYFIN_USER || '').trim().toLowerCase();
+  const u = (want && users.find((x) => x.Name.toLowerCase() === want)) || users.find((x) => x.Policy && x.Policy.IsAdministrator) || users[0];
+  jfUserId = u ? u.Id : null;
+  return jfUserId;
+}
 const mapJfTrack = (i) => ({
   id: i.Id, title: i.Name, artist: (i.Artists || []).join(', ') || i.AlbumArtist || '',
   album: i.Album || '', albumId: i.AlbumId || null, number: i.IndexNumber || null, disc: i.ParentIndexNumber || null,
@@ -187,6 +200,42 @@ async function tidalSearch(q) {
     tracks: a.attributes?.numberOfItems || null,
   }));
   return { tracks, albums };
+}
+
+async function tidalArtistAlbums(name) {
+  const sDoc = await tidal('/searchResults', [['filter[query]', name], ['include', 'artists']]);
+  const sRes = Array.isArray(sDoc.data) ? sDoc.data[0] : sDoc.data;
+  const map = indexIncluded(sDoc);
+  const norm = (x) => (x || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]/g, '');
+  const cands = relIds(sRes, 'artists').map((r) => map.get(`artists:${r.id}`)).filter(Boolean);
+  const artist = cands.find((a) => norm(a.attributes?.name) === norm(name));
+  if (!artist) return { artist: null, albums: [] };
+  const refs = [];
+  let cursor = null;
+  for (let page = 0; page < 6; page++) {
+    const doc = await tidal(`/artists/${artist.id}/relationships/albums`, cursor ? [['page[cursor]', cursor]] : []);
+    refs.push(...(doc.data || []));
+    const next = doc.links?.next;
+    cursor = next ? new URL(next, 'https://openapi.tidal.com').searchParams.get('page[cursor]') : null;
+    if (!cursor) break;
+  }
+  const ids = [...new Set(refs.filter((d) => d.type === 'albums').map((d) => d.id))].slice(0, 100);
+  const albums = [];
+  for (let i = 0; i < ids.length; i += 20) {
+    const doc = await tidalByIds('albums', ids.slice(i, i + 20), ['artists', 'coverArt'], ['artists']);
+    const m = indexIncluded(doc);
+    for (const a of doc.data || []) {
+      albums.push({
+        id: a.id, title: a.attributes?.title, artist: artistNames(m, a), type: a.attributes?.albumType || 'ALBUM',
+        year: (a.attributes?.releaseDate || '').slice(0, 4) || null, date: a.attributes?.releaseDate || '',
+        cover: pickCover(m, a), tracks: a.attributes?.numberOfItems || null, explicit: !!a.attributes?.explicit,
+      });
+    }
+  }
+  // Tidal often lists clean + explicit versions: keep one per title+type (prefer explicit)
+  const seen = new Map();
+  for (const a of albums) { const k = norm(a.title) + a.type; const o = seen.get(k); if (!o || (a.explicit && !o.explicit)) seen.set(k, a); }
+  return { artist: { id: artist.id, name: artist.attributes?.name }, albums: [...seen.values()].sort((a, b) => (b.date || '').localeCompare(a.date || '')) };
 }
 
 async function tidalAlbum(id) {
@@ -301,6 +350,58 @@ const server = http.createServer(async (req, res) => {
       const a = (info.Items || [])[0];
       if (!a) return fail(res, 404, 'Album not found');
       return send(res, 200, { ...mapJfAlbum(a), tracks: (tr.Items || []).map(mapJfTrack) });
+    }
+    if (p === '/api/library/artists') {
+      const start = parseInt(q.get('start') || '0', 10) || 0;
+      const j = await jf(`/Artists/AlbumArtists?SortBy=SortName&SortOrder=Ascending&StartIndex=${start}&Limit=120&Fields=PrimaryImageAspectRatio&EnableImages=true`);
+      return send(res, 200, { total: j.TotalRecordCount || 0, artists: (j.Items || []).map(mapJfArtist) });
+    }
+    if ((m = /^\/api\/library\/artist\/([\w-]+)$/.exec(p))) {
+      const id = m[1];
+      const uid = await jfUser().catch(() => null);
+      const [info, albums, top] = await Promise.all([
+        jf(`/Items?Ids=${id}&Fields=Overview,Genres`),
+        jf(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&AlbumArtistIds=${id}&SortBy=ProductionYear,PremiereDate,SortName&SortOrder=Descending&${jfFields}`),
+        uid ? jf(`/Users/${uid}/Items?IncludeItemTypes=Audio&Recursive=true&ArtistIds=${id}&SortBy=PlayCount,SortName&SortOrder=Descending&Limit=10&Fields=UserData`).catch(() => ({ Items: [] })) : { Items: [] },
+      ]);
+      const a = (info.Items || [])[0];
+      if (!a) return fail(res, 404, 'Artist not found');
+      const topItems = (top.Items || []);
+      const played = topItems.some((t) => t.UserData && t.UserData.PlayCount > 0);
+      return send(res, 200, {
+        ...mapJfArtist(a), genres: a.Genres || [],
+        albums: (albums.Items || []).map(mapJfAlbum),
+        topSongs: topItems.map((t) => ({ ...mapJfTrack(t), plays: (t.UserData && t.UserData.PlayCount) || 0 })),
+        topByPlays: played,
+      });
+    }
+    if ((m = /^\/api\/library\/artist\/([\w-]+)\/tracks$/.exec(p))) {
+      const j = await jf(`/Items?IncludeItemTypes=Audio&Recursive=true&ArtistIds=${m[1]}&SortBy=ProductionYear,Album,ParentIndexNumber,IndexNumber&SortOrder=Ascending&Limit=2000`);
+      return send(res, 200, { tracks: (j.Items || []).map(mapJfTrack) });
+    }
+    if (p === '/api/library/songs') {
+      const start = parseInt(q.get('start') || '0', 10) || 0;
+      const SORTS = {
+        title: 'SortBy=SortName&SortOrder=Ascending',
+        artist: 'SortBy=AlbumArtist,Album,ParentIndexNumber,IndexNumber&SortOrder=Ascending',
+        album: 'SortBy=Album,ParentIndexNumber,IndexNumber&SortOrder=Ascending',
+        recent: 'SortBy=DateCreated,SortName&SortOrder=Descending',
+      };
+      const j = await jf(`/Items?IncludeItemTypes=Audio&Recursive=true&${SORTS[q.get('sort')] || SORTS.title}&StartIndex=${start}&Limit=150`);
+      return send(res, 200, { total: j.TotalRecordCount || 0, tracks: (j.Items || []).map(mapJfTrack) });
+    }
+    if (p === '/api/library/genres') {
+      const j = await jf('/MusicGenres?SortBy=SortName&SortOrder=Ascending&Recursive=true&Fields=ItemCounts');
+      return send(res, 200, { genres: (j.Items || []).map((g) => ({ id: g.Id, name: g.Name, albums: g.AlbumCount || null, songs: g.SongCount || null })) });
+    }
+    if ((m = /^\/api\/library\/genre\/([\w-]+)$/.exec(p))) {
+      const j = await jf(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&GenreIds=${m[1]}&SortBy=AlbumArtist,ProductionYear,SortName&SortOrder=Ascending&${jfFields}`);
+      return send(res, 200, { albums: (j.Items || []).map(mapJfAlbum) });
+    }
+    if (p === '/api/tidal/artist') {
+      const name = (q.get('name') || '').trim();
+      if (!name) return send(res, 200, { artist: null, albums: [] });
+      return send(res, 200, await tidalArtistAlbums(name));
     }
     if (p === '/api/library/search') {
       const term = encodeURIComponent(q.get('q') || '');

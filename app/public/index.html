@@ -62,6 +62,27 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .src{font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:var(--panel2);color:var(--accent);margin-left:6px}
 .toast{position:fixed;right:20px;bottom:100px;background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:8px;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none;max-width:360px}
 .toast.show{opacity:1;transform:none}.toast.err{border-color:var(--err)}
+/* ---------- library sections ---------- */
+.ltabs{display:flex;gap:8px;margin:4px 0 6px;flex-wrap:wrap;align-items:center}
+.ltabs button{padding:8px 16px;border-radius:999px;background:var(--panel2);color:var(--dim);font-weight:600}
+.ltabs button.on{background:var(--text);color:var(--bg)}
+.ltabs .sp{margin-left:auto;display:flex;gap:6px}
+.agrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:22px 18px}
+.acard{cursor:pointer;text-align:center;min-width:0}
+.acard .pic{aspect-ratio:1;border-radius:50%;background:var(--panel2) center/cover;display:grid;place-items:center;font-size:42px;font-weight:700;color:var(--dim);transition:transform .15s}
+.acard:hover .pic{transform:scale(1.03);outline:2px solid var(--accent)}
+.acard .n{margin-top:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acard .s{font-size:12px;color:var(--dim)}
+.ahero{display:flex;gap:28px;align-items:center;margin:6px 0 10px}
+.ahero .pic{width:190px;height:190px;border-radius:50%;background:var(--panel2) center/cover;flex:none;display:grid;place-items:center;font-size:64px;font-weight:700;color:var(--dim);box-shadow:0 16px 40px #0007}
+.ahero h1{font-size:38px;margin:2px 0 6px}
+.ahero .meta{color:var(--dim)}
+.gtile{border-radius:12px;padding:18px 16px;min-height:96px;cursor:pointer;font-weight:700;font-size:17px;display:flex;flex-direction:column;justify-content:space-between;color:#fff}
+.gtile span{font-size:12px;font-weight:500;opacity:.8}
+.gtile:hover{filter:brightness(1.15)}
+.more-tidal .card .art{opacity:.95}
+@media(max-width:760px){.agrid{grid-template-columns:repeat(auto-fill,minmax(105px,1fr));gap:16px 12px}.ahero{flex-direction:column;align-items:flex-start;gap:16px}.ahero .pic{width:150px;height:150px}.ahero h1{font-size:30px}}
+
 /* ---------- full-screen now playing ---------- */
 .np{cursor:pointer}
 #fs{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;color:#fff;
@@ -437,9 +458,9 @@ let view = { name: 'library' }, history_ = [];
 function go(name, args = {}, push = true) {
   if (push) history_.push(view);
   view = { name, ...args };
-  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.v === name || (name === 'album' && b.dataset.v === 'library') || (name === 'tidalAlbum' && b.dataset.v === 'search')));
+  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.v === name || (['album', 'artist', 'genre'].includes(name) && b.dataset.v === 'library') || (name === 'tidalAlbum' && b.dataset.v === 'search')));
   main.scrollTop = 0;
-  ({ library: renderLibrary, search: renderSearch, downloads: renderDownloads, album: renderAlbum, tidalAlbum: renderTidalAlbum })[name]();
+  ({ library: renderLibrary, search: renderSearch, downloads: renderDownloads, album: renderAlbum, tidalAlbum: renderTidalAlbum, artist: renderArtist, genre: renderGenre })[name]();
 }
 const backBtn = () => history_.length ? '<button class="back" id="back">← Back</button>' : '';
 const bindBack = () => { const b = $('#back'); if (b) b.onclick = () => { const v = history_.pop(); go(v.name, v, false); }; };
@@ -463,21 +484,147 @@ function albumCardsIdx(pairs) {
       <div class="t">${esc(a.title)}</div><div class="a">${a.year || ''}</div>
     </div>`).join('') + '</div>';
 }
-async function renderLibrary() {
+let libTab = 'artists'; // opens on Artists every time
+const LIB_TABS = { artists: 'Artists', albums: 'Albums', songs: 'Songs', genres: 'Genres' };
+function libHeader(extra = '') {
+  return `<div class="ltabs">${Object.entries(LIB_TABS).map(([k, v]) => `<button data-lt="${k}" class="${k === libTab ? 'on' : ''}">${v}</button>`).join('')}<span class="sp">${extra}</span></div>`;
+}
+function bindLibHeader() {
+  main.querySelectorAll('[data-lt]').forEach((b) => b.onclick = () => { libTab = b.dataset.lt; renderLibrary(); });
+}
+const initial = (n) => esc((n || '?').trim().charAt(0).toUpperCase());
+function artistCards(list) {
+  return '<div class="agrid">' + list.map((a, i) => `
+    <div class="acard" data-art="${i}"><div class="pic" style="${a.hasImage ? `background-image:${jfImg(a.id, 300)}` : ''}">${a.hasImage ? '' : initial(a.name)}</div>
+    <div class="n">${esc(a.name)}</div></div>`).join('') + '</div>';
+}
+function renderLibrary() {
+  main.scrollTop = 0;
+  ({ artists: renderArtists, albums: renderAlbums, songs: renderSongs, genres: renderGenres })[libTab]();
+}
+async function renderArtists() {
+  main.innerHTML = libHeader() + '<div class="empty">Loading…</div>'; bindLibHeader();
+  try {
+    let { artists, total } = await api('/api/library/artists');
+    const draw = () => { $('#arts').innerHTML = artistCards(artists); $('#arts').querySelectorAll('[data-art]').forEach((c) => c.onclick = () => go('artist', { id: artists[+c.dataset.art].id })); };
+    main.innerHTML = libHeader(`<span class="tag" style="align-self:center">${total} artists</span>`) + '<div id="arts" style="margin-top:14px"></div>' +
+      (artists.length < total ? '<div style="text-align:center;margin-top:20px"><button class="btn sec" id="more">Load more</button></div>' : '');
+    bindLibHeader(); draw();
+    const more = $('#more');
+    if (more) more.onclick = async () => {
+      more.disabled = true;
+      const r = await api(`/api/library/artists?start=${artists.length}`);
+      artists = artists.concat(r.artists); draw();
+      if (artists.length >= total) more.remove(); else more.disabled = false;
+    };
+  } catch (e) { main.innerHTML = libHeader() + errBox(e); bindLibHeader(); }
+}
+const SONG_SORTS = { title: 'Title', artist: 'Artist', album: 'Album', recent: 'Recently added' };
+let songSort = 'title';
+async function renderSongs() {
+  main.innerHTML = libHeader() + '<div class="empty">Loading…</div>'; bindLibHeader();
+  try {
+    let { tracks, total } = await api(`/api/library/songs?sort=${songSort}`);
+    const sel = `<select id="ssort" class="btn sec" style="border:0;appearance:auto">${Object.entries(SONG_SORTS).map(([k, v]) => `<option value="${k}"${k === songSort ? ' selected' : ''}>${v}</option>`).join('')}</select>`;
+    main.innerHTML = libHeader(`<button class="btn sec" id="shufall">Shuffle all</button>${sel}`) + `<h2>${total} songs</h2><div id="songs"></div>` +
+      (tracks.length < total ? '<div style="text-align:center;margin-top:20px"><button class="btn sec" id="more">Load more</button></div>' : '');
+    bindLibHeader();
+    let list;
+    const draw = () => { list = tracks.map((t) => ({ ...t, src: 'jf' })); $('#songs').innerHTML = trackRows(list); bindRows($('#songs'), list); };
+    draw();
+    $('#ssort').onchange = (e) => { songSort = e.target.value; renderSongs(); };
+    $('#shufall').onclick = () => { if (!list.length) return; setShuffle(true); playList(list, Math.floor(Math.random() * list.length)); };
+    const more = $('#more');
+    if (more) more.onclick = async () => {
+      more.disabled = true;
+      const r = await api(`/api/library/songs?sort=${songSort}&start=${tracks.length}`);
+      tracks = tracks.concat(r.tracks); draw();
+      if (tracks.length >= total) more.remove(); else more.disabled = false;
+    };
+  } catch (e) { main.innerHTML = libHeader() + errBox(e); bindLibHeader(); }
+}
+function genreColor(name) {
+  let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `linear-gradient(135deg,hsl(${h} 55% 38%),hsl(${(h + 40) % 360} 60% 24%))`;
+}
+async function renderGenres() {
+  main.innerHTML = libHeader() + '<div class="empty">Loading…</div>'; bindLibHeader();
+  try {
+    const { genres } = await api('/api/library/genres');
+    main.innerHTML = libHeader() + (genres.length ? '<div class="grid" style="margin-top:14px">' + genres.map((g, i) => `
+      <div class="gtile" data-g="${i}" style="background:${genreColor(g.name)}">${esc(g.name)}<span>${g.albums ? g.albums + ' albums' : ''}</span></div>`).join('') + '</div>'
+      : '<div class="empty">No genres found — your files may be missing genre tags.</div>');
+    bindLibHeader();
+    main.querySelectorAll('[data-g]').forEach((t) => t.onclick = () => go('genre', { id: genres[+t.dataset.g].id, gname: genres[+t.dataset.g].name }));
+  } catch (e) { main.innerHTML = libHeader() + errBox(e); bindLibHeader(); }
+}
+async function renderGenre() {
+  loading();
+  try {
+    const { albums } = await api(`/api/library/genre/${view.id}`);
+    main.innerHTML = `${backBtn()}<h1 style="margin:4px 0 16px">${esc(view.gname || 'Genre')}</h1><div id="galb">${albumCards(albums, 'jf')}</div>`;
+    bindBack(); bindCards($('#galb'), albums, 'jf');
+  } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }
+}
+const normTitle = (x) => (x || '').toLowerCase().normalize('NFKD').replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^a-z0-9]/g, '');
+async function renderArtist() {
+  loading();
+  try {
+    const a = await api(`/api/library/artist/${view.id}`);
+    const isSingle = (al) => al.tracks && al.tracks <= 3;
+    const full = a.albums.filter((x) => !isSingle(x)), singles = a.albums.filter(isSingle);
+    const top = a.topSongs.slice(0, 5).map((t) => ({ ...t, src: 'jf' }));
+    main.innerHTML = `${backBtn()}
+      <div class="ahero"><div class="pic" style="${a.hasImage ? `background-image:${jfImg(a.id, 500)}` : ''}">${a.hasImage ? '' : initial(a.name)}</div>
+        <div><div class="meta">Artist</div><h1>${esc(a.name)}</h1>
+        <div class="meta">${a.albums.length} release${a.albums.length === 1 ? '' : 's'} in your library${a.genres.length ? ' · ' + esc(a.genres.slice(0, 3).join(', ')) : ''}</div>
+        <div class="acts"><button class="btn" id="aplay">${I.play.replace('<svg', '<svg width="16"')} Play</button><button class="btn sec" id="ashuf">Shuffle</button></div></div></div>
+      ${top.length ? `<h2>${a.topByPlays ? 'Top songs' : 'Songs'}</h2><div id="atop">${trackRows(top)}</div>` : ''}
+      ${full.length ? `<h2>Albums</h2><div id="afull">${albumCards(full, 'jf')}</div>` : ''}
+      ${singles.length ? `<h2>Singles &amp; EPs</h2><div id="asing">${albumCards(singles, 'jf')}</div>` : ''}
+      <div id="atidal"><h2>More on Tidal <span class="tag">loading…</span></h2></div>`;
+    bindBack();
+    if (top.length) bindRows($('#atop'), top);
+    if (full.length) bindCards($('#afull'), full, 'jf');
+    if (singles.length) bindCards($('#asing'), singles, 'jf');
+    const playAll = async (shuf) => {
+      try {
+        const { tracks } = await api(`/api/library/artist/${a.id}/tracks`);
+        const list = tracks.map((t) => ({ ...t, src: 'jf' }));
+        if (!list.length) return toast('No songs found', true);
+        setShuffle(shuf); playList(list, shuf ? Math.floor(Math.random() * list.length) : 0);
+      } catch (e) { toast(e.message, true); }
+    };
+    $('#aplay').onclick = () => playAll(false);
+    $('#ashuf').onclick = () => playAll(true);
+    // Tidal releases you don't own yet
+    const viewId = view.id;
+    api(`/api/tidal/artist?name=${encodeURIComponent(a.name)}`).then((t) => {
+      if (view.name !== 'artist' || view.id !== viewId) return;
+      const owned = new Set(a.albums.map((x) => normTitle(x.title)));
+      const missing = t.albums.filter((x) => !owned.has(normTitle(x.title)));
+      const box = $('#atidal');
+      if (!t.artist) { box.innerHTML = '<h2>More on Tidal</h2><div class="empty">Couldn\'t find this artist on Tidal.</div>'; return; }
+      if (!missing.length) { box.innerHTML = '<h2>More on Tidal</h2><div class="empty">You have everything Tidal has by this artist.</div>'; return; }
+      const label = { ALBUM: 'Album', EP: 'EP', SINGLE: 'Single' };
+      box.innerHTML = `<h2>More on Tidal <span class="tag">${missing.length} not in your library</span></h2><div class="more-tidal">${albumCards(missing.map((x) => ({ ...x, year: [label[x.type] || '', x.year].filter(Boolean).join(' · ') })), 'tidal')}</div>`;
+      bindCards(box, missing, 'tidal');
+    }).catch((e) => { const box = $('#atidal'); if (box) box.innerHTML = '<h2>More on Tidal</h2>' + errBox(e); });
+  } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }
+}
+
+async function renderAlbums() {
   loading();
   try {
     let { albums, total } = await api(`/api/library/albums?sort=${libSort}`);
     const draw = () => libSort === 'artist' ? artistGroups(albums) : albumCards(albums, 'jf');
-    main.innerHTML = `
-      <h2>Your library <span class="tag">${total} albums</span>
-        <span style="margin-left:auto;display:flex;gap:6px">
-          <select id="sort" class="btn sec" style="border:0;appearance:auto">${Object.entries(SORT_LABELS).map(([k, v]) => `<option value="${k}"${k === libSort ? ' selected' : ''}>${v}</option>`).join('')}</select>
-          <button class="btn sec" id="scan" title="Ask Jellyfin to rescan">Rescan</button>
-        </span></h2>
+    main.innerHTML = libHeader(`<select id="sort" class="btn sec" style="border:0;appearance:auto">${Object.entries(SORT_LABELS).map(([k, v]) => `<option value="${k}"${k === libSort ? ' selected' : ''}>${v}</option>`).join('')}</select>
+          <button class="btn sec" id="scan" title="Ask Jellyfin to rescan">Rescan</button>`) + `
+      <h2>${total} albums</h2>
       <div id="alb">${draw()}</div>
       ${albums.length < total ? '<div style="text-align:center;margin-top:20px"><button class="btn sec" id="more">Load more</button></div>' : ''}`;
-    bindCards($('#alb'), albums, 'jf');
-    $('#sort').onchange = (e) => { libSort = e.target.value; try { localStorage.tfSort = libSort; } catch {} renderLibrary(); };
+    bindLibHeader(); bindCards($('#alb'), albums, 'jf');
+    $('#sort').onchange = (e) => { libSort = e.target.value; try { localStorage.tfSort = libSort; } catch {} renderAlbums(); };
     $('#scan').onclick = async () => { try { await api('/api/library/refresh', { method: 'POST' }); toast('Jellyfin library scan started'); } catch (e) { toast(e.message, true); } };
     const more = $('#more');
     if (more) more.onclick = async () => {
@@ -487,7 +634,7 @@ async function renderLibrary() {
       $('#alb').innerHTML = draw(); bindCards($('#alb'), albums, 'jf');
       if (albums.length >= total) more.remove(); else more.disabled = false;
     };
-  } catch (e) { main.innerHTML = errBox(e); }
+  } catch (e) { main.innerHTML = libHeader() + errBox(e); bindLibHeader(); }
 }
 
 async function renderAlbum() {
