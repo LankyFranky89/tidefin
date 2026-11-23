@@ -101,6 +101,19 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .modal .acts{justify-content:flex-end;margin:0}
 .btn.danger{background:var(--err);color:#2a0707}
 
+/* ---------- discography picker ---------- */
+.modal.wide{max-width:560px;max-height:86vh;display:flex;flex-direction:column}
+.dlist{overflow:auto;margin:0 -8px 16px;padding:0 8px;flex:1}
+.ditem{display:grid;grid-template-columns:22px 48px minmax(0,1fr);gap:12px;align-items:center;padding:8px;border-radius:8px;cursor:pointer}
+.ditem:hover{background:#ffffff0d}
+.ditem input{width:18px;height:18px;accent-color:var(--accent)}
+.ditem .c{width:48px;height:48px;border-radius:6px;background:var(--panel2) center/cover}
+.ditem .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ditem .a{font-size:13px;color:var(--dim)}
+.ditem.own{opacity:.55;cursor:default}
+.dtools{display:flex;gap:12px;font-size:13px;color:var(--dim);margin:-6px 0 10px}
+.dtools button{color:var(--accent);font-size:13px}
+
 /* ---------- library sections ---------- */
 .ltabs{display:flex;gap:8px;margin:4px 0 6px;flex-wrap:wrap;align-items:center}
 .ltabs button{padding:8px 16px;border-radius:999px;background:var(--panel2);color:var(--dim);font-weight:600}
@@ -720,6 +733,58 @@ async function renderGenre() {
   } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }
 }
 const normTitle = (x) => (x || '').toLowerCase().normalize('NFKD').replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^a-z0-9]/g, '');
+// Studio albums only: skip live albums, compilations, EPs and singles.
+const LIVE_RE = /\b(live|unplugged|in concert|concert|on stage|bootleg|tour edition)\b/i;
+const COMP_RE = /\b(best of|greatest hits|the very best|collection|anthology|essentials?|the hits|singles|b-sides|rarities|demos?|remixe?s|karaoke|instrumentals?)\b/i;
+function studioAlbums(albums) {
+  const keep = albums.filter((a) => a.type === 'ALBUM' && !LIVE_RE.test(a.title) && !COMP_RE.test(a.title));
+  // one version per album: prefer the one with the most tracks (deluxe/bonus editions), then explicit
+  const best = new Map();
+  for (const a of keep) {
+    const k = normTitle(a.title), o = best.get(k);
+    if (!o || (a.tracks || 0) > (o.tracks || 0) || ((a.tracks || 0) === (o.tracks || 0) && a.explicit && !o.explicit)) best.set(k, a);
+  }
+  return [...best.values()].sort((x, y) => (x.date || x.year || '').localeCompare(y.date || y.year || ''));
+}
+function discographyPicker(artistName, albums, ownedTitles) {
+  const list = studioAlbums(albums);
+  const owned = (x) => ownedTitles.has(normTitle(x.title)) || albumInLib(x) || ['done', 'queued'].includes(dlState.get(String(x.id)));
+  const missing = list.filter((x) => !owned(x));
+  if (!list.length) return toast('No studio albums found on Tidal for ' + artistName, true);
+  const bgEl = document.createElement('div'); bgEl.className = 'modal-bg';
+  bgEl.innerHTML = `<div class="modal wide" role="dialog" aria-modal="true">
+    <h3>Download ${esc(artistName)} discography</h3>
+    <p style="margin-bottom:12px">Studio albums only — live albums, compilations, EPs and singles are left out.</p>
+    <div class="dtools"><span id="dcount"></span><button id="dall">Select all</button><button id="dnone">Select none</button></div>
+    <div class="dlist">${list.map((x, i) => { const own = owned(x); return `
+      <label class="ditem${own ? ' own' : ''}"><input type="checkbox" data-di="${i}" ${own ? 'disabled' : 'checked'}>
+        <div class="c" style="background-image:${bg(x.cover)}"></div>
+        <div style="min-width:0"><div class="t">${esc(x.title)}</div><div class="a">${x.year || ''}${x.tracks ? ' · ' + x.tracks + ' songs' : ''}${own ? ' · <span style="color:var(--ok)">✓ in library</span>' : ''}</div></div>
+      </label>`; }).join('')}</div>
+    <div class="acts"><button class="btn sec" id="dcancel">Cancel</button><button class="btn" id="dgo"></button></div></div>`;
+  document.body.appendChild(bgEl);
+  const boxes = [...bgEl.querySelectorAll('input[data-di]:not([disabled])')];
+  const upd = () => {
+    const n = boxes.filter((b) => b.checked).length;
+    bgEl.querySelector('#dcount').textContent = `${missing.length} of ${list.length} missing`;
+    const go = bgEl.querySelector('#dgo'); go.textContent = n ? `Download ${n} album${n === 1 ? '' : 's'}` : 'Nothing selected'; go.disabled = !n;
+  };
+  boxes.forEach((b) => b.onchange = upd); upd();
+  bgEl.querySelector('#dall').onclick = () => { boxes.forEach((b) => b.checked = true); upd(); };
+  bgEl.querySelector('#dnone').onclick = () => { boxes.forEach((b) => b.checked = false); upd(); };
+  const close = () => { bgEl.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  bgEl.onclick = (e) => { if (e.target === bgEl) close(); };
+  bgEl.querySelector('#dcancel').onclick = close;
+  bgEl.querySelector('#dgo').onclick = async () => {
+    const pick = boxes.filter((b) => b.checked).map((b) => list[+b.dataset.di]);
+    close();
+    for (const x of pick) { await download('album', x.id, x.title, x.artist || artistName); await new Promise((r) => setTimeout(r, 300)); }
+    toast(`Queued ${pick.length} album${pick.length === 1 ? '' : 's'} by ${artistName} — see Downloads`);
+  };
+}
+
 async function renderArtist() {
   loading();
   try {
@@ -731,7 +796,7 @@ async function renderArtist() {
       <div class="ahero"><div class="pic" style="${a.hasImage ? `background-image:${jfImg(a.id, 500)}` : ''}">${a.hasImage ? '' : initial(a.name)}</div>
         <div><div class="meta">Artist</div><h1>${esc(a.name)}</h1>
         <div class="meta">${a.albums.length} release${a.albums.length === 1 ? '' : 's'} in your library${a.genres.length ? ' · ' + esc(a.genres.slice(0, 3).join(', ')) : ''}</div>
-        <div class="acts"><button class="btn" id="aplay">${I.play.replace('<svg', '<svg width="16"')} Play</button><button class="btn sec" id="ashuf">Shuffle</button><button class="ib more" id="armenu" title="More">${IMORE}</button></div></div></div>
+        <div class="acts"><button class="btn" id="aplay">${I.play.replace('<svg', '<svg width="16"')} Play</button><button class="btn sec" id="ashuf">Shuffle</button><button class="btn sec" id="adisco" disabled>${I.dl.replace('<svg', '<svg width="16"')} Discography</button><button class="ib more" id="armenu" title="More">${IMORE}</button></div></div></div>
       ${top.length ? `<h2>${a.topByPlays ? 'Top songs' : 'Songs'}</h2><div id="atop">${trackRows(top)}</div>` : ''}
       ${full.length ? `<h2>Albums</h2><div id="afull">${albumCards(full, 'jf')}</div>` : ''}
       ${singles.length ? `<h2>Singles &amp; EPs</h2><div id="asing">${albumCards(singles, 'jf')}</div>` : ''}
@@ -758,6 +823,9 @@ async function renderArtist() {
       const owned = new Set(a.albums.map((x) => normTitle(x.title)));
       const missing = t.albums.filter((x) => !owned.has(normTitle(x.title)));
       const box = $('#atidal');
+      const dbtn = $('#adisco');
+      if (dbtn && t.artist) { dbtn.disabled = false; dbtn.onclick = () => discographyPicker(a.name, t.albums, owned); }
+      else if (dbtn) dbtn.title = 'Artist not found on Tidal';
       if (!t.artist) { box.innerHTML = '<h2>More on Tidal</h2><div class="empty">Couldn\'t find this artist on Tidal.</div>'; return; }
       if (!missing.length) { box.innerHTML = '<h2>More on Tidal</h2><div class="empty">You have everything Tidal has by this artist.</div>'; return; }
       const label = { ALBUM: 'Album', EP: 'EP', SINGLE: 'Single' };
