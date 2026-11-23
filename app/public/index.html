@@ -62,6 +62,54 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .src{font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:var(--panel2);color:var(--accent);margin-left:6px}
 .toast{position:fixed;right:20px;bottom:100px;background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:8px;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none;max-width:360px}
 .toast.show{opacity:1;transform:none}.toast.err{border-color:var(--err)}
+/* ---------- full-screen now playing ---------- */
+.np{cursor:pointer}
+#fs{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;color:#fff;
+ background:linear-gradient(180deg,var(--fs1,#2a3340) 0%,var(--fs2,#151a20) 55%,#0b0d10 100%);
+ transform:translateY(100%);transition:transform .32s cubic-bezier(.2,.8,.2,1),background 1s;overflow:hidden;touch-action:pan-y}
+#fs.open{transform:none}
+#fs.drag{transition:none}
+#fs .top{display:flex;align-items:center;justify-content:center;padding:calc(10px + env(safe-area-inset-top)) 16px 4px;position:relative}
+#fs .grab{width:42px;height:5px;border-radius:3px;background:#ffffff55}
+#fs .from{position:absolute;left:0;right:0;top:calc(22px + env(safe-area-inset-top));text-align:center;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#ffffffaa;pointer-events:none}
+#fs .body{flex:1;display:flex;flex-direction:column;align-items:center;overflow:auto;padding:28px 24px calc(20px + env(safe-area-inset-bottom))}
+#fs .cover{width:min(84vw,46vh,520px);aspect-ratio:1;border-radius:14px;background:#ffffff14 center/cover;box-shadow:0 24px 60px #0009;flex:none;transition:transform .3s}
+#fs.paused .cover{transform:scale(.94)}
+#fs .meta{width:min(84vw,520px);margin-top:26px;display:flex;align-items:center;gap:12px}
+#fs .meta>div{flex:1;min-width:0}
+#fs .ft{font-size:22px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#fs .fa{font-size:16px;color:#ffffffcc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#fs .falb{font-size:14px;color:#ffffff99;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;max-width:100%}
+#fs .falb:hover{color:#fff;text-decoration:underline}
+#fs .ib{color:#ffffffcc}#fs .ib:hover{background:#ffffff1f;color:#fff}
+#fs .ib.on{color:var(--accent)}
+#fs .ib.dl.done{color:var(--ok)}#fs .ib.dl.err{color:var(--err)}
+#fs .fseek{width:min(84vw,520px);margin-top:18px}
+#fs .fseek input{width:100%;accent-color:#fff}
+#fs .times{display:flex;justify-content:space-between;font-size:12px;color:#ffffffaa;font-variant-numeric:tabular-nums}
+#fs .fctl{width:min(84vw,520px);display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+#fs .fctl .big{width:68px;height:68px;border-radius:50%;background:#fff;color:#111;display:grid;place-items:center}
+#fs .fctl .big svg{width:30px;height:30px}
+#fs .fctl .ib{width:48px;height:48px}#fs .fctl .ib svg{width:26px;height:26px}
+#fs .fctl .sm svg{width:20px;height:20px}
+#fs .rep1{position:relative}#fs .rep1::after{content:"1";position:absolute;font-size:9px;font-weight:800;right:9px;top:9px}
+#fs .upnext{width:min(84vw,520px);margin-top:34px}
+#fs .upnext h3{font-size:13px;text-transform:uppercase;letter-spacing:1px;color:#ffffffaa;margin:0 0 8px}
+#fs .qi{display:grid;grid-template-columns:40px 1fr auto;gap:12px;align-items:center;padding:7px 8px;border-radius:8px;cursor:pointer}
+#fs .qi:hover{background:#ffffff14}
+#fs .qi .th{width:40px;height:40px;border-radius:5px;background:#ffffff14 center/cover}
+#fs .qi .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#fs .qi .a{font-size:13px;color:#ffffffaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#fs .qi .d{font-size:12px;color:#ffffff88;font-variant-numeric:tabular-nums}
+#fs .none{color:#ffffff88;font-size:14px;padding:8px}
+@media(min-width:900px) and (min-aspect-ratio:4/3){
+ #fs .body{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,440px);gap:56px;align-items:center;padding:20px 6vw 40px;overflow:hidden}
+ #fs .left{display:flex;flex-direction:column;align-items:center}
+ #fs .cover{width:min(40vw,62vh,560px)}
+ #fs .meta,#fs .fseek,#fs .fctl{width:min(40vw,62vh,560px)}
+ #fs .upnext{width:100%;margin:0;max-height:78vh;overflow:auto;background:#00000033;border-radius:14px;padding:16px}
+}
+@media(max-width:899px),(max-aspect-ratio:4/3){ #fs .left{display:contents} }
 @media(max-width:760px){
  header{flex-wrap:wrap;padding:10px 12px}.search{order:3;max-width:none;flex-basis:100%}.dots{display:none}
  main{padding:14px 12px 150px}.grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px}
@@ -100,6 +148,27 @@ input[type=range]{flex:1;accent-color:var(--accent)}
     <input type="range" id="vol" min="0" max="100" value="90">
   </div>
 </footer>
+<div id="fs" aria-hidden="true">
+  <div class="top"><div class="grab"></div><div class="from" id="fs-from"></div></div>
+  <div class="body">
+    <div class="left">
+      <div class="cover" id="fs-cover"></div>
+      <div class="meta">
+        <div><div class="ft" id="fs-t"></div><div class="fa" id="fs-a"></div><span class="falb" id="fs-alb"></span></div>
+        <button class="ib dl" id="fs-dl" title="Download to library" hidden></button>
+      </div>
+      <div class="fseek"><input type="range" id="fs-seek" min="0" max="1000" value="0"><div class="times"><span id="fs-cur">0:00</span><span id="fs-dur">0:00</span></div></div>
+      <div class="fctl">
+        <button class="ib sm" id="fs-shuf" title="Shuffle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg></button>
+        <button class="ib" id="fs-prev" title="Previous"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM9.5 12l8.5 6V6z"/></svg></button>
+        <button class="big" id="fs-pp" title="Play/Pause"></button>
+        <button class="ib" id="fs-next" title="Next"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
+        <button class="ib sm" id="fs-rep" title="Repeat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></svg></button>
+      </div>
+    </div>
+    <div class="upnext"><h3>Up next</h3><div id="fs-q"></div></div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 <audio id="audio" preload="auto"></audio>
 <script>
@@ -161,8 +230,32 @@ async function pollQueue(force) {
 }
 
 // ---------- player ----------
-let queue = [], qi = -1;
-function playList(list, i) { queue = list; qi = i; loadCurrent(); }
+let queue = [], qi = -1, origQueue = null, shuffle = false, repeat = 'off'; // repeat: off | all | one
+try { shuffle = localStorage.tfShuf === '1'; if (['off', 'all', 'one'].includes(localStorage.tfRep)) repeat = localStorage.tfRep; } catch {}
+function shuffled(list, keep) {
+  const rest = list.filter((_, i) => i !== keep);
+  for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
+  return [list[keep], ...rest];
+}
+function playList(list, i) {
+  origQueue = list.slice();
+  if (shuffle) { queue = shuffled(list, i); qi = 0; } else { queue = list.slice(); qi = i; }
+  loadCurrent();
+}
+function setShuffle(on) {
+  shuffle = on; try { localStorage.tfShuf = on ? '1' : '0'; } catch {}
+  const cur = queue[qi];
+  if (cur && origQueue) {
+    if (on) { queue = shuffled(queue, qi); qi = 0; }
+    else { queue = origQueue.slice(); qi = Math.max(0, queue.indexOf(cur)); }
+  }
+  renderFs();
+}
+function nextTrack(auto) {
+  if (auto && repeat === 'one') { audio.currentTime = 0; audio.play().catch(() => {}); return; }
+  if (qi < queue.length - 1) { qi++; loadCurrent(); }
+  else if (repeat === 'all' && queue.length) { qi = 0; loadCurrent(); }
+}
 function loadCurrent() {
   const t = queue[qi]; if (!t) return;
   audio.src = t.src === 'tidal' ? `/api/tidal/stream/${t.id}` : `/api/library/stream/${t.id}`;
@@ -173,7 +266,7 @@ function loadCurrent() {
   if ('mediaSession' in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.album || '' });
   }
-  updateNowDl(); markPlaying();
+  updateNowDl(); markPlaying(); renderFs();
 }
 function updateNowDl() {
   const t = queue[qi], b = $('#np-dl');
@@ -185,18 +278,122 @@ function markPlaying() {
   const t = queue[qi];
   document.querySelectorAll('.row[data-key]').forEach((r) => r.classList.toggle('playing', !!t && r.dataset.key === `${t.src}:${t.id}`));
 }
-const setPP = () => $('#pp').innerHTML = audio.paused ? I.play : I.pause;
+const setPP = () => { $('#pp').innerHTML = audio.paused ? I.play : I.pause; $('#fs-pp').innerHTML = audio.paused ? I.play : I.pause; $('#fs').classList.toggle('paused', audio.paused); };
 setPP();
 $('#pp').onclick = () => { if (!audio.src) return; audio.paused ? audio.play() : audio.pause(); };
-$('#next').onclick = () => { if (qi < queue.length - 1) { qi++; loadCurrent(); } };
+$('#next').onclick = () => nextTrack(false);
 $('#prev').onclick = () => { if (audio.currentTime > 3 || qi <= 0) audio.currentTime = 0; else { qi--; loadCurrent(); } };
 audio.onplay = audio.onpause = setPP;
-audio.onended = () => $('#next').onclick();
+audio.onended = () => nextTrack(true);
 audio.onerror = () => { const t = queue[qi]; if (t) toast(t.src === 'tidal' ? 'Tidal playback failed — you can still download it' : 'Could not play this file', true); };
-audio.ontimeupdate = () => { $('#cur').textContent = fmt(audio.currentTime); $('#dur').textContent = fmt(audio.duration); if (!seeking && audio.duration) $('#seek').value = audio.currentTime / audio.duration * 1000; };
+audio.ontimeupdate = () => {
+  const c = fmt(audio.currentTime), d = fmt(audio.duration);
+  $('#cur').textContent = c; $('#dur').textContent = d; $('#fs-cur').textContent = c; $('#fs-dur').textContent = d;
+  if (!seeking && audio.duration) { const v = audio.currentTime / audio.duration * 1000; $('#seek').value = v; $('#fs-seek').value = v; }
+};
 let seeking = false;
 $('#seek').oninput = () => seeking = true;
 $('#seek').onchange = (e) => { if (audio.duration) audio.currentTime = e.target.value / 1000 * audio.duration; seeking = false; };
+$('#fs-seek').oninput = () => seeking = true;
+$('#fs-seek').onchange = $('#seek').onchange;
+
+// ---------- full-screen now playing ----------
+const fs = $('#fs');
+const coverUrl = (t, size) => t.src === 'tidal' ? (t.cover ? '/api/img?u=' + encodeURIComponent(t.cover) : null) : (t.imageId ? `/api/library/image/${t.imageId}?h=${size}` : null);
+let lastColorKey = '';
+function applyColors(url) {
+  if (!url || url === lastColorKey) return;
+  lastColorKey = url;
+  const img = new Image();
+  img.onload = () => {
+    try {
+      const c = document.createElement('canvas'); c.width = c.height = 24;
+      const x = c.getContext('2d'); x.drawImage(img, 0, 0, 24, 24);
+      const px = x.getImageData(0, 0, 24, 24).data;
+      // weighted average favouring saturated, mid-bright pixels
+      let r = 0, g = 0, b = 0, w = 0;
+      for (let i = 0; i < px.length; i += 4) {
+        const R = px[i], G = px[i + 1], B = px[i + 2], mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+        const sat = mx ? (mx - mn) / mx : 0, lum = mx / 255;
+        const wt = 0.15 + sat * 2 * (lum > 0.12 && lum < 0.95 ? 1 : 0.2);
+        r += R * wt; g += G * wt; b += B * wt; w += wt;
+      }
+      r /= w; g /= w; b /= w;
+      const k = 150 / Math.max(r, g, b, 1); // normalise brightness so dark covers still get colour
+      const c1 = `rgb(${Math.min(255, r * k * .75) | 0},${Math.min(255, g * k * .75) | 0},${Math.min(255, b * k * .75) | 0})`;
+      const c2 = `rgb(${r * k * .32 | 0},${g * k * .32 | 0},${b * k * .32 | 0})`;
+      fs.style.setProperty('--fs1', c1); fs.style.setProperty('--fs2', c2);
+    } catch { /* cross-origin image: keep default colours */ }
+  };
+  img.src = url;
+}
+function renderFs() {
+  const t = queue[qi];
+  if (!t) return;
+  const big = coverUrl(t, 800);
+  $('#fs-cover').style.backgroundImage = big ? `url('${big}')` : 'none';
+  $('#fs-t').innerHTML = esc(t.title) + (t.explicit ? '<span class="e">E</span>' : '');
+  $('#fs-a').textContent = t.artist || '';
+  $('#fs-alb').textContent = t.album || '';
+  $('#fs-alb').style.display = t.album && t.albumId ? '' : (t.album ? '' : 'none');
+  $('#fs-from').textContent = t.src === 'tidal' ? 'Playing from Tidal' : 'Playing from your library';
+  const dl = $('#fs-dl');
+  if (t.src === 'tidal') { dl.hidden = false; dl.dataset.dl = t.id; dl.className = dlClass(t.id); dl.innerHTML = dlIcon(t.id); dl.onclick = () => download('track', t.id, t.title, t.artist); }
+  else dl.hidden = true;
+  $('#fs-shuf').classList.toggle('on', shuffle);
+  const rb = $('#fs-rep'); rb.classList.toggle('on', repeat !== 'off'); rb.classList.toggle('rep1', repeat === 'one');
+  rb.title = { off: 'Repeat: off', all: 'Repeat: all', one: 'Repeat: one' }[repeat];
+  const up = queue.slice(qi + 1);
+  $('#fs-q').innerHTML = up.length ? up.slice(0, 100).map((u, k) => `
+    <div class="qi" data-q="${qi + 1 + k}"><div class="th" style="background-image:${coverUrl(u, 100) ? `url('${coverUrl(u, 100)}')` : 'none'}"></div>
+    <div style="min-width:0"><div class="t">${esc(u.title)}</div><div class="a">${esc(u.artist || '')}</div></div><div class="d">${fmt(u.duration)}</div></div>`).join('')
+    : `<div class="none">${repeat === 'all' && queue.length > 1 ? 'Starts over from the first song' : 'Nothing queued after this song'}</div>`;
+  $('#fs-q').querySelectorAll('[data-q]').forEach((el) => el.onclick = () => { qi = +el.dataset.q; loadCurrent(); });
+  if (fs.classList.contains('open')) applyColors(coverUrl(t, 100));
+  setPP();
+}
+function openFs() {
+  if (!queue[qi] || fs.classList.contains('open')) return;
+  fs.classList.add('open'); fs.setAttribute('aria-hidden', 'false');
+  renderFs(); applyColors(coverUrl(queue[qi], 100));
+  history.pushState({ tfFs: 1 }, '');
+}
+function closeFs(fromPop) {
+  if (!fs.classList.contains('open')) return;
+  fs.classList.remove('open'); fs.setAttribute('aria-hidden', 'true'); fs.style.transform = '';
+  if (!fromPop && history.state && history.state.tfFs) history.back();
+}
+window.addEventListener('popstate', () => closeFs(true));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFs(); });
+$('.np').addEventListener('click', openFs);
+$('#fs-pp').onclick = () => $('#pp').onclick();
+$('#fs-next').onclick = () => nextTrack(false);
+$('#fs-prev').onclick = () => $('#prev').onclick();
+$('#fs-shuf').onclick = () => setShuffle(!shuffle);
+$('#fs-rep').onclick = () => { repeat = { off: 'all', all: 'one', one: 'off' }[repeat]; try { localStorage.tfRep = repeat; } catch {} renderFs(); };
+$('#fs-alb').onclick = () => {
+  const t = queue[qi]; if (!t || !t.albumId) return;
+  closeFs(); setTimeout(() => go(t.src === 'tidal' ? 'tidalAlbum' : 'album', { id: t.albumId }), 50);
+};
+// swipe down to close
+let dragY = null, dragStart = 0;
+fs.addEventListener('touchstart', (e) => {
+  const body = fs.querySelector('.body');
+  if (e.target.closest('input[type=range]')) return;
+  if (body.scrollTop > 0 && !e.target.closest('.top')) return;   // let the queue scroll first
+  dragY = e.touches[0].clientY; dragStart = Date.now();
+}, { passive: true });
+fs.addEventListener('touchmove', (e) => {
+  if (dragY === null) return;
+  const dy = e.touches[0].clientY - dragY;
+  if (dy > 0) { fs.classList.add('drag'); fs.style.transform = `translateY(${dy}px)`; }
+}, { passive: true });
+fs.addEventListener('touchend', (e) => {
+  if (dragY === null) return;
+  const dy = e.changedTouches[0].clientY - dragY, fast = dy > 60 && Date.now() - dragStart < 250;
+  fs.classList.remove('drag'); dragY = null;
+  if (dy > 140 || fast) closeFs(); else fs.style.transform = '';
+});
 $('#vol').oninput = (e) => { audio.volume = e.target.value / 100; try { localStorage.tfVol = e.target.value; } catch {} };
 try { if (localStorage.tfVol) { $('#vol').value = localStorage.tfVol; audio.volume = localStorage.tfVol / 100; } } catch {}
 if ('mediaSession' in navigator) {
@@ -312,7 +509,7 @@ async function renderTidalAlbum() {
   loading();
   try {
     const a = await api(`/api/tidal/album/${view.id}`);
-    const list = a.tracks.map((t) => ({ ...t, src: 'tidal', album: a.title, cover: a.cover }));
+    const list = a.tracks.map((t) => ({ ...t, src: 'tidal', album: a.title, albumId: a.id, cover: a.cover }));
     main.innerHTML = `${backBtn()}
       <div class="hero"><div class="art" style="background-image:${bg(a.cover)}"></div>
       <div><div class="meta">Album · TIDAL</div><h1>${esc(a.title)}</h1><div class="meta">${esc(a.artist)}${a.year ? ' · ' + a.year : ''} · ${list.length} tracks</div>

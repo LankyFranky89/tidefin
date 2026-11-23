@@ -374,6 +374,14 @@ const server = http.createServer(async (req, res) => {
       return send(res, r.ok ? 200 : 502, { ok: r.ok });
     }
 
+    // Same-origin proxy for Tidal cover art (lets the player read its colours)
+    if (p === '/api/img') {
+      let u; try { u = new URL(q.get('u') || ''); } catch { return fail(res, 400, 'Bad image URL'); }
+      if (u.protocol !== 'https:' || !/(^|\.)tidal\.com$/.test(u.hostname)) return fail(res, 403, 'Only Tidal images');
+      const up = await fetch(u.href);
+      if (!up.ok) return fail(res, 404, 'No image');
+      return pipeUpstream(up, res);
+    }
     if (p.startsWith('/api/')) return fail(res, 404, 'Unknown endpoint');
 
     // --- static files ---
