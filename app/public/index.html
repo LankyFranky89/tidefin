@@ -124,6 +124,11 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 .dtools{display:flex;gap:12px;font-size:13px;color:var(--dim);margin:-6px 0 10px}
 .dtools button{color:var(--accent);font-size:13px}
 
+/* ---------- Android app ---------- */
+.in-app .right input[type=range],.in-app .right>svg{display:none}
+.in-app #appset{margin-left:4px}
+@media(max-width:760px){.in-app #appset{position:absolute;right:12px;top:calc(10px + env(safe-area-inset-top))}}
+
 /* ---------- library sections ---------- */
 .ltabs{display:flex;gap:8px;margin:4px 0 6px;flex-wrap:wrap;align-items:center}
 .ltabs button{padding:8px 16px;border-radius:999px;background:rgba(255,255,255,.08);color:var(--dim);font-weight:600}
@@ -215,6 +220,7 @@ input[type=range]{flex:1;accent-color:var(--accent)}
     <button data-v="downloads">Downloads</button>
   </nav>
   <div class="search"><input id="q" type="search" placeholder="Search your library and Tidal…" autocomplete="off"></div>
+  <button class="ib" id="appset" title="App settings" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
   <div class="dots"><span class="dot" id="h-jf">Jellyfin</span><span class="dot" id="h-td">Tidarr</span><span class="dot" id="h-ti">Tidal</span></div>
 </header>
 <main id="main"></main>
@@ -259,7 +265,39 @@ input[type=range]{flex:1;accent-color:var(--accent)}
 <audio id="audio" preload="auto"></audio>
 <script>
 const $ = (s, el = document) => el.querySelector(s);
-const main = $('#main'), audio = $('#audio');
+const main = $('#main');
+// Inside the Android app, playback runs in the phone's native player (background, lock screen, Bluetooth, car).
+const NATIVE = (window.TidefinNative && window.TidefinNative.isNative && window.TidefinNative.isNative()) ? window.TidefinNative : null;
+function makeNativeAudio() {
+  const a = {
+    _paused: true, _pos: 0, _dur: NaN, _loaded: false,
+    onplay: null, onpause: null, ontimeupdate: null, onended: null, onerror: null, volume: 1,
+    get src() { return this._loaded ? 'native' : ''; }, set src(v) {},
+    get paused() { return this._paused; },
+    get currentTime() { return this._pos; },
+    set currentTime(v) { this._pos = v; NATIVE.seekTo(Math.max(0, v) * 1000); },
+    get duration() { return this._dur; },
+    play() { NATIVE.play(); return Promise.resolve(); },
+    pause() { NATIVE.pause(); },
+  };
+  return a;
+}
+const audio = NATIVE ? makeNativeAudio() : $('#audio');
+let nativeSig = '';
+window.tfNative = (ev) => {
+  if (ev.type === 'error') { toast('Could not play this song (' + ev.message + ') — skipping', true); return; }
+  if (ev.type !== 'state') return;
+  const wasPaused = audio._paused;
+  audio._loaded = ev.count > 0;
+  audio._paused = !!ev.paused || !!ev.ended;
+  audio._pos = (ev.pos || 0) / 1000;
+  audio._dur = ev.dur > 0 ? ev.dur / 1000 : NaN;
+  if (ev.count > 0 && ev.index >= 0 && ev.index < queue.length && ev.index !== qi && ev.count === queue.length) {
+    qi = ev.index; previewMode = srcFor(queue[qi]).preview; updateNowUi(queue[qi]);   // native moved to another song
+  }
+  if (audio.ontimeupdate) audio.ontimeupdate();
+  if (wasPaused !== audio._paused) { const h = audio._paused ? audio.onpause : audio.onplay; if (h) h(); }
+};
 const I = {
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
   pause: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>',
@@ -363,15 +401,37 @@ function setShuffle(on) {
     if (on) { queue = shuffled(queue, qi); qi = 0; }
     else { queue = origQueue.slice(); qi = Math.max(0, queue.indexOf(cur)); }
   }
+  if (NATIVE && queue.length) sendNativeQueue(true);
   renderFs();
 }
 function nextTrack(auto) {
+  if (NATIVE) { if (!auto) NATIVE.next(); return; }   // native player advances on its own
   if (auto && repeat === 'one') { audio.currentTime = 0; audio.play().catch(() => {}); return; }
   if (qi < queue.length - 1) { qi++; loadCurrent(); }
   else if (repeat === 'all' && queue.length) { qi = 0; loadCurrent(); }
 }
+function srcFor(t) {
+  if (t.src !== 'tidal') return { url: `/api/library/stream/${t.id}`, preview: false };
+  const local = libTrackMap.get(nkey(t.artist, t.title));
+  if (local) return { url: `/api/library/stream/${local.id}`, preview: false };
+  return { url: `/api/tidal/preview/${t.id}?` + new URLSearchParams({ isrc: t.isrc || '', artist: t.artist || '', title: t.title || '' }), preview: true };
+}
+function nativeItems() {
+  const abs = (u) => u ? new URL(u, location.href).href : '';
+  return queue.map((x) => { const s = srcFor(x); return { id: x.src + ':' + x.id, url: abs(s.url), preview: s.preview, title: x.title || '', artist: x.artist || '', album: x.album || '', art: abs(coverUrl(x, 600)) }; });
+}
+function sendNativeQueue(keepPos) {
+  nativeSig = queue.map((x) => x.src + x.id).join('|');
+  NATIVE.load(JSON.stringify(nativeItems()), qi, repeat, keepPos ? audio._pos * 1000 : 0);
+}
 function loadCurrent() {
   const t = queue[qi]; if (!t) return;
+  if (NATIVE) {
+    previewMode = srcFor(t).preview;
+    if (queue.map((x) => x.src + x.id).join('|') === nativeSig) NATIVE.skipTo(qi); else sendNativeQueue(false);
+    updateNowUi(t);
+    return;
+  }
   // Tidal song you already own -> play your local file. Not owned -> 30-second preview.
   previewMode = false;
   let src = t.src === 'tidal' ? `/api/tidal/stream/${t.id}` : `/api/library/stream/${t.id}`;
@@ -385,10 +445,13 @@ function loadCurrent() {
   }
   audio.src = src;
   audio.play().catch(() => {});
+  updateNowUi(t);
+}
+function updateNowUi(t) {
   $('#np-t').innerHTML = esc(t.title) + (t.src === 'tidal' ? `<span class="src">${previewMode ? 'PREVIEW' : 'LOCAL'}</span>` : '');
   $('#np-a').textContent = [t.artist, t.album].filter(Boolean).join(' — ');
   $('#np-th').style.backgroundImage = t.src === 'tidal' ? bg(t.cover) : jfImg(t.imageId, 120);
-  if ('mediaSession' in navigator) {
+  if (!NATIVE && 'mediaSession' in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.album || '' });
   }
   updateNowDl(); markPlaying(); renderFs();
@@ -411,12 +474,12 @@ const setPP = () => { $('#pp').innerHTML = audio.paused ? I.play : I.pause; $('#
 setPP();
 $('#pp').onclick = () => { if (!audio.src) return; audio.paused ? audio.play() : audio.pause(); };
 $('#next').onclick = () => nextTrack(false);
-$('#prev').onclick = () => { if (audio.currentTime > 3 || qi <= 0) audio.currentTime = 0; else { qi--; loadCurrent(); } };
+$('#prev').onclick = () => { if (NATIVE) return NATIVE.prev(); if (audio.currentTime > 3 || qi <= 0) audio.currentTime = 0; else { qi--; loadCurrent(); } };
 audio.onplay = audio.onpause = () => { setPP(); markPlaying(); };
 audio.onended = () => nextTrack(true);
 audio.onerror = () => { const t = queue[qi]; if (t) toast(t.src === 'tidal' ? 'Tidal playback failed — you can still download it' : 'Could not play this file', true); };
 audio.ontimeupdate = () => {
-  if (previewMode && audio.currentTime >= PREVIEW_SECS) { audio.pause(); nextTrack(true); return; }
+  if (!NATIVE && previewMode && audio.currentTime >= PREVIEW_SECS) { audio.pause(); nextTrack(true); return; }
   const dur = previewMode ? Math.min(PREVIEW_SECS, audio.duration || PREVIEW_SECS) : audio.duration;
   const c = fmt(audio.currentTime), d = fmt(dur);
   $('#cur').textContent = c; $('#dur').textContent = d; $('#fs-cur').textContent = c; $('#fs-dur').textContent = d;
@@ -525,7 +588,7 @@ $('#fs-pp').onclick = () => $('#pp').onclick();
 $('#fs-next').onclick = () => nextTrack(false);
 $('#fs-prev').onclick = () => $('#prev').onclick();
 $('#fs-shuf').onclick = () => setShuffle(!shuffle);
-$('#fs-rep').onclick = () => { repeat = { off: 'all', all: 'one', one: 'off' }[repeat]; try { localStorage.tfRep = repeat; } catch {} renderFs(); };
+$('#fs-rep').onclick = () => { repeat = { off: 'all', all: 'one', one: 'off' }[repeat]; try { localStorage.tfRep = repeat; } catch {} if (NATIVE) NATIVE.setRepeat(repeat); renderFs(); };
 $('#fs-alb').onclick = () => {
   const t = queue[qi]; if (!t || !t.albumId) return;
   closeFs(); setTimeout(() => go(t.src === 'tidal' ? 'tidalAlbum' : 'album', { id: t.albumId }), 50);
@@ -1000,6 +1063,10 @@ api('/api/health').then((h) => {
   }
 }).catch(() => {});
 loadLibIndex();
+if (NATIVE) {
+  document.documentElement.classList.add('in-app');
+  const g = $('#appset'); g.hidden = false; g.onclick = () => NATIVE.openSettings();
+}
 go('library', {}, false);
 pollQueue();
 </script>
