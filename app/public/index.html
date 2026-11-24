@@ -473,6 +473,10 @@ main.nav-back{animation:navBack .25s cubic-bezier(.2,.8,.2,1)}
 main.nav-tab{animation:navTab .18s ease-out}
 html.tv main.nav-fwd,html.tv main.nav-back{animation-duration:.3s}
 @media (prefers-reduced-motion:reduce){main.nav-fwd,main.nav-back,main.nav-tab{animation:none}}
+html.tv #fs-seek{height:14px;cursor:pointer}
+html.tv #fs-seek::-webkit-slider-thumb{width:30px;height:30px}
+html.tv #fs .fseek{padding:10px 0}
+html.tv #fs-seek.tvf{outline:3px solid var(--accent);outline-offset:8px;border-radius:10px}
 </style>
 </head>
 <body>
@@ -1536,10 +1540,18 @@ async function renderArtist() {
 
 // ---------- TV: d-pad spatial navigation + remote keys ----------
 function initTv() {
-  const FOCUSABLE = 'nav button, header input, main button, main .card, main .acard, main .qt, main .gtile, main .row, main select, main .back, footer button, footer .np, .modal button, .modal input, .menu button, #fs button, #fs .qi, #fs .falb';
+  let seekHold = 0;
+  function tvSeek(d) {
+    if (!audio.src) return;
+    const dur = previewMode ? Math.min(PREVIEW_SECS, audio.duration || PREVIEW_SECS) : audio.duration;
+    if (!dur) return;
+    audio.currentTime = Math.max(0, Math.min(dur - 0.5, (audio.currentTime || 0) + d));
+    toast((d > 0 ? '⏩ ' : '⏪ ') + fmt(audio.currentTime) + ' / ' + fmt(dur));
+  }
+  const FOCUSABLE = 'nav button, header input, main button, main .card, main .acard, main .qt, main .gtile, main .row, main select, main .back, footer button, footer .np, .modal button, .modal input, .menu button, #fs button, #fs .qi, #fs .falb, #fs-seek';
   const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.bottom > -200 && r.top < innerHeight + 2000 && getComputedStyle(el).visibility !== 'hidden'; };
   const scope = () => document.querySelector('.modal-bg') || document.querySelector('.menu') || (fs.classList.contains('open') ? fs : document);
-  const items = () => [...scope().querySelectorAll(FOCUSABLE)].filter((el) => !el.disabled && !el.closest('[hidden]') && visible(el) && !(scope() === document && el.closest('#fs')));
+  const items = () => [...scope().querySelectorAll(FOCUSABLE)].filter((el) => !el.disabled && !(el.tagName === 'BUTTON' && el.closest('main .card, main .acard')) && !el.closest('[hidden]') && visible(el) && !(scope() === document && el.closest('#fs')));
   let cur = null;
   const setF = (el) => {
     if (!el) return;
@@ -1578,10 +1590,16 @@ function initTv() {
     const k = e.key, code = e.keyCode;
     const typing = document.activeElement && document.activeElement.tagName === 'INPUT';
     const dirs = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+    const onSeek = cur && cur.id === 'fs-seek';
+    if (onSeek && (k === 'ArrowLeft' || k === 'ArrowRight')) { // seek bar: 10 s jumps, faster while held
+      e.preventDefault(); seekHold = e.repeat ? seekHold + 1 : 0;
+      tvSeek((k === 'ArrowRight' ? 1 : -1) * (seekHold > 8 ? 30 : 10)); return;
+    }
     if (dirs[k]) {
       if (typing && (k === 'ArrowLeft' || k === 'ArrowRight')) return; // move the text cursor
       e.preventDefault(); move(dirs[k]); return;
     }
+    if (k === 'Enter' && cur && cur.id === 'fs-seek') { e.preventDefault(); $('#pp').onclick(); return; }
     if (k === 'Enter' && cur && !typing && !/^(BUTTON|INPUT|SELECT)$/.test(cur.tagName)) { e.preventDefault(); cur.click(); return; }
     if (code === 461 || k === 'GoBack' || k === 'BrowserBack') { // LG remote Back
       e.preventDefault();
@@ -1591,11 +1609,14 @@ function initTv() {
       return;
     }
     // media keys on the remote
+    if ((code === 415 || k === 'MediaPlay') && cur && cur.closest('main .card')) { const pl = cur.querySelector('.pl, [data-yapl]'); if (pl) { e.preventDefault(); pl.click(); return; } }
     if (code === 415 || k === 'MediaPlay') { e.preventDefault(); if (audio.paused) $('#pp').onclick(); return; }
+    if (code === 417 || k === 'MediaFastForward') { e.preventDefault(); tvSeek(10); return; }
+    if (code === 412 || k === 'MediaRewind') { e.preventDefault(); tvSeek(-10); return; }
     if (code === 19 || k === 'MediaPause') { e.preventDefault(); if (!audio.paused) $('#pp').onclick(); return; }
     if (k === 'MediaPlayPause' || code === 179) { e.preventDefault(); $('#pp').onclick(); return; }
-    if (code === 417 || code === 176 || k === 'MediaTrackNext' || k === 'MediaFastForward' || code === 33) { e.preventDefault(); nextTrack(false); return; }
-    if (code === 412 || code === 177 || k === 'MediaTrackPrevious' || k === 'MediaRewind' || code === 34) { e.preventDefault(); $('#prev').onclick(); return; }
+    if (code === 176 || k === 'MediaTrackNext' || code === 33) { e.preventDefault(); nextTrack(false); return; }
+    if (code === 177 || k === 'MediaTrackPrevious' || code === 34) { e.preventDefault(); $('#prev').onclick(); return; }
     if (code === 413 || k === 'MediaStop') { e.preventDefault(); audio.pause(); return; }
   }, true);
   // re-focus something sensible after each page change / dialog
