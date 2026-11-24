@@ -1818,6 +1818,15 @@ const ytState = new Map(); // videoId -> queued | done | error
 function ytKey(artist, title) {
   return nkey(artist, String(title || '').replace(/\s*[\(\[](official|lyric|audio|video|visualizer|hd|4k)[^\)\]]*[\)\]]/ig, ''));
 }
+function ytAlbRow(title, pairs) {
+  return pairs.length ? `<div class="sub">${title}</div><div class="hrow">${pairs.map(([a, i]) => `
+      <div class="card" data-yalb="${i}">
+        <div class="art" style="background-image:${bg(a.cover)}"><span class="badge ytb">${a.kind === 'Upload' ? 'UPLOAD' : 'YOUTUBE'}</span>
+          <button class="pl ytpl" data-yapl="${i}" title="Play album">${I.play}</button></div>
+        <div class="tt"><div><div class="t">${esc(a.title)}</div><div class="a">${esc(a.artist)}${a.year ? ' · ' + a.year : ''}${a.kind && !/^(album|upload)$/i.test(a.kind) ? ' · ' + esc(a.kind) : ''}${a.kind === 'Upload' ? ' · fan upload' : ''}</div></div>
+          <button class="ib dl" data-yadl="${i}" title="Download whole album">${I.dl}</button></div>
+      </div>`).join('')}</div>` : '';
+}
 function renderYtSection(el, yt, tidal, showAll) {
   if (!el) return;
   const tKeys = new Set(tidal.tracks.map((t) => ytKey(t.artist, t.title)));
@@ -1829,13 +1838,8 @@ function renderYtSection(el, yt, tidal, showAll) {
   for (const t of songs) if (!ytState.get(t.id) && trackInLib(t)) ytState.set(t.id, 'done');
   const onT = (t) => tKeys.has(ytKey(t.artist, t.title));
   el.innerHTML =
-    (albums.length ? `<div class="sub">Albums · ↓ downloads the whole album</div><div class="hrow">${albums.map((a, i) => `
-      <div class="card" data-yalb="${i}">
-        <div class="art" style="background-image:${bg(a.cover)}"><span class="badge ytb">YOUTUBE</span>
-          <button class="pl ytpl" data-yapl="${i}" title="Play album">${I.play}</button></div>
-        <div class="tt"><div><div class="t">${esc(a.title)}</div><div class="a">${esc(a.artist)}${a.year ? ' · ' + a.year : ''}${a.kind && a.kind !== 'Album' ? ' · ' + esc(a.kind) : ''}</div></div>
-          <button class="ib dl" data-yadl="${i}" title="Download whole album">${I.dl}</button></div>
-      </div>`).join('')}</div>` : '') +
+    ytAlbRow('Albums · ↓ downloads the whole album', albums.map((a, i) => [a, i]).filter(([a]) => !/^(single|ep)$/i.test(a.kind || ''))) +
+    ytAlbRow('EPs &amp; singles', albums.map((a, i) => [a, i]).filter(([a]) => /^(single|ep)$/i.test(a.kind || ''))) +
     (songs.length ? '<div class="sub">Songs</div><div class="rows">' + songs.map((t, i) => `
       <div class="row ytrow" data-yi="${i}" data-vid="${esc(t.id)}">
         <div class="n">${i + 1}</div>

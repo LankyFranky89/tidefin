@@ -396,6 +396,21 @@ async function ytSearchAlbums(q) {
     return { id: browseId, title: cols[0][0].text, artist, kind: parts[0] || 'Album', year: (parts.find((x) => /^\d{4}$/.test(x.trim())) || '').trim() || null, cover: ytThumb(it.thumbnail) };
   }).filter(Boolean).slice(0, 16);
 }
+// Full albums uploaded by other channels (community playlists), e.g. rare or out-of-print releases
+const YT_PLAYLISTS = 'EgeKAQQoAEABagwQDhAKEAMQBBAJEAU='; // "Community playlists" filter
+async function ytSearchUploads(q) {
+  const j = await ytApi('search', { query: q + ' full album', params: YT_PLAYLISTS });
+  return ytFind(j.contents, 'musicResponsiveListItemRenderer').map((it) => {
+    const cols = (it.flexColumns || []).map((c) => c.musicResponsiveListItemFlexColumnRenderer?.text?.runs || []);
+    const browseId = it.navigationEndpoint?.browseEndpoint?.browseId;
+    if (!browseId || !cols[0] || !cols[0][0]) return null;
+    const title = cols[0][0].text;
+    if (!/album|full|\bep\b|discography/i.test(title)) return null;
+    const parts = ytText(cols[1] || []).split(' • ');
+    const uploader = parts.length > 1 ? parts[1] : parts[0] || '';
+    return { id: browseId, title, artist: uploader, uploader, kind: 'Upload', year: (title.match(/\b(19|20)\d{2}\b/) || [])[0] || null, cover: ytThumb(it.thumbnail) };
+  }).filter(Boolean).slice(0, 10);
+}
 async function ytAlbum(browseId) {
   const j = await ytApi('browse', { browseId });
   const hdr = ytFind(j, 'musicResponsiveHeaderRenderer')[0] || ytFind(j, 'musicDetailHeaderRenderer')[0] || {};
@@ -626,7 +641,8 @@ const server = http.createServer(async (req, res) => {
       if (!settings.youtube) return send(res, 200, { off: true, tracks: [] });
       const term = (q.get('q') || '').trim();
       if (!term) return send(res, 200, { tracks: [], albums: [] });
-      const [tracks, albums] = await Promise.all([ytSearch(term), ytSearchAlbums(term).catch(() => [])]);
+      const [tracks, official, uploads] = await Promise.all([ytSearch(term), ytSearchAlbums(term).catch(() => []), ytSearchUploads(term).catch((e) => { console.error('yt uploads:', e.message); return []; })]);
+      const albums = official.concat(uploads);
       return send(res, 200, { tracks, albums });
     }
     if ((m = /^\/api\/yt\/album\/([\w-]+)$/.exec(p))) {
