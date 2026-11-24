@@ -1675,6 +1675,7 @@ function renderSettings() {
           <button class="ib mv" data-up="${k}" title="Move up" ${i === 0 ? 'disabled' : ''}>↑</button><button class="ib mv" data-down="${k}" title="Move down" ${i === shelfOrder.length - 1 ? 'disabled' : ''}>↓</button>
           <button class="tg ${shelves.includes(k) ? 'on' : ''}" data-shelf="${k}" role="switch" aria-checked="${shelves.includes(k)}"></button></div>`).join('')}</div></div>
       <div class="it"><div>Library opens on</div>${seg('libraryTab', [['artists', 'Artists'], ['albums', 'Albums'], ['songs', 'Songs'], ['genres', 'Genres']])}</div>
+      <div class="it"><div>Tidy collab artists<small>Move songs from artists you only have because of a collab to the artist you own</small></div><button class="btn sec" id="s-tidy">Check</button></div>
     </div>
     <div class="sh">Downloads</div>
     <div class="grp">
@@ -1715,6 +1716,7 @@ function renderSettings() {
   };
   main.querySelectorAll('[data-up]').forEach((b) => b.onclick = () => moveShelf(b.dataset.up, -1));
   main.querySelectorAll('[data-down]').forEach((b) => b.onclick = () => moveShelf(b.dataset.down, 1));
+  const st = $('#s-tidy'); if (st) st.onclick = tidyCollabs;
   api('/api/health').then((h) => { const e = $('#set-health'); if (e) e.textContent = ['jellyfin', 'tidarr', 'tidal'].map((k) => (h[k] ? '● ' : '○ ') + k[0].toUpperCase() + k.slice(1)).join('   '); }).catch(() => {});
 }
 let renderSettingsShelfOrder = null;
@@ -1980,6 +1982,34 @@ function fanReview(m, picked, artist, build) {
     };
     document.body.appendChild(bgEl);
   });
+}
+async function tidyCollabs() {
+  const b = $('#s-tidy'); if (b) { b.disabled = true; b.textContent = 'Checking…'; }
+  let songs;
+  try { ({ songs } = await api('/api/tidy/collabs')); } catch (e) { toast(e.message, true); return; }
+  finally { if (b) { b.disabled = false; b.textContent = 'Check'; } }
+  if (!songs.length) return toast('Nothing to tidy: no collab-only artists found');
+  const bgEl = document.createElement('div'); bgEl.className = 'modal-bg';
+  bgEl.innerHTML = `<div class="modal fanrev" role="dialog" aria-modal="true"><h3>Tidy collab artists</h3>
+    <p>${songs.length} song${songs.length === 1 ? '' : 's'} sit under an artist you only have because of a collab. They'll be moved to the artist you own, and the folder they leave is removed if it's empty.</p>
+    <div class="frrows">${songs.map((t, i) => `<label class="frrow" style="grid-template-columns:28px 1fr;align-items:center"><input type="checkbox" data-tk="${i}" checked>
+      <div><div style="font-weight:600">${esc(t.title)}</div><div class="fryt">now under ${esc(t.from)}${t.album ? ' · ' + esc(t.album) : ''}</div>
+      <select data-tt="${i}" style="margin-top:4px">${t.options.map((o) => `<option>${esc(o.name)}</option>`).join('')}</select></div></label>`).join('')}</div>
+    <div class="acts"><button class="btn sec" data-c="0">Cancel</button><button class="btn" data-c="1">Move songs</button></div></div>`;
+  const close = () => bgEl.remove();
+  bgEl.onclick = (e) => { if (e.target === bgEl) close(); };
+  bgEl.querySelector('[data-c="0"]').onclick = close;
+  bgEl.querySelector('[data-c="1"]').onclick = async (e) => {
+    const moves = songs.map((t, i) => bgEl.querySelector(`[data-tk="${i}"]`).checked ? { id: t.id, fileUnder: bgEl.querySelector(`[data-tt="${i}"]`).value } : null).filter(Boolean);
+    if (!moves.length) return close();
+    e.target.disabled = true; e.target.textContent = 'Moving…';
+    try {
+      const r = await api('/api/tidy/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moves }) });
+      close();
+      toast(`Moved ${r.moved} song${r.moved === 1 ? '' : 's'}` + (r.failed.length ? ` · ${r.failed.length} failed: ${r.failed[0]}` : ''), !!r.failed.length);
+    } catch (err) { e.target.disabled = false; e.target.textContent = 'Move songs'; toast(err.message, true); }
+  };
+  document.body.appendChild(bgEl);
 }
 async function ytQueue(items, single) {
   items = items.filter((t) => !['queued', 'done'].includes(ytState.get(t.id)));

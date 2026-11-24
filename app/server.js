@@ -144,8 +144,12 @@ async function getLibIndex(fresh) {
       const isS = singleKeys.has(skey((t.Artists || [])[0] || t.AlbumArtist, t.Name)) || singleKeys.has(skey(t.AlbumArtist, t.Name));
       allSingle.set(t.AlbumId, (allSingle.get(t.AlbumId) ?? true) && isS);
     }
+    const aaSongs = new Map(), aaAlb = new Map();
+    for (const t of tr.Items || []) { const k = snorm(t.AlbumArtist); if (!k) continue; aaSongs.set(k, (aaSongs.get(k) || 0) + 1); const ak = k + '|' + t.AlbumId; aaAlb.set(ak, (aaAlb.get(ak) || 0) + 1); }
+    const realAA = new Set([...aaAlb].filter(([, n]) => n >= 3).map(([k]) => k.split('|')[0]));
     libIndexCache = {
       at: Date.now(),
+      smallArtists: new Set([...aaSongs].filter(([k, n]) => n <= 2 && !realAA.has(k)).map(([k]) => k)),
       loose: [...allSingle].filter(([, v]) => v).map(([k]) => k),
       albums: (al.Items || []).map((i) => [i.AlbumArtist || (i.Artists || [])[0] || '', i.Name, per.get(i.Id) || 0]),
       tracks: (tr.Items || []).map((i) => [(i.Artists || [])[0] || i.AlbumArtist || '', i.Name, i.Id, i.Album || '', (i.ImageTags && i.ImageTags.Primary) ? i.Id : (i.AlbumPrimaryImageTag ? i.AlbumId : null), i.RunTimeTicks ? Math.round(i.RunTimeTicks / 1e7) : null]),
@@ -687,21 +691,50 @@ async function relocate(id) {
   const names = r.artist.split(/,\s*/).map(snorm);
   const it = (j.Items || []).find((i) => snorm(i.Name) === snorm(r.title) && (i.Artists || []).some((a) => names.includes(snorm(a))) && snorm(i.AlbumArtist) !== snorm(r.fileUnder));
   if (!it) return false;
-  const src = localPath(it.Path); if (!src) return false;
-  if (!(await ensureFfmpeg())) return false;
+  const mv = await moveTrack(it, r.fileUnder);
+  if (mv === null) return false;
+  delete relocs[id]; saveRelocs(); jfScanSoon();
+  return true;
+}
+// Retag a song's album artist and move it into that artist's folder. null = try again later, string = error
+async function moveTrack(it, fileUnder) {
+  const src = localPath(it.Path); if (!src) return null;
+  if (!(await ensureFfmpeg())) return null;
   const albumDir = path.dirname(src), artistDir = path.dirname(albumDir);
-  const destDir = path.join(MUSIC_DIR, safeName(r.fileUnder), path.basename(albumDir));
+  const destDir = path.join(MUSIC_DIR, safeName(fileUnder), path.basename(albumDir));
   fs.mkdirSync(destDir, { recursive: true });
   const dest = path.join(destDir, path.basename(src));
+  if (dest === src) return 'already there';
   try {
-    await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', src, '-map', '0', '-c', 'copy', '-metadata', `album_artist=${r.fileUnder}`, dest]);
+    await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', src, '-map', '0', '-c', 'copy', '-metadata', `album_artist=${fileUnder}`, dest]);
     for (const f of fs.readdirSync(albumDir)) if (/^(cover|folder)\.(jpe?g|png)$/i.test(f) && !fs.existsSync(path.join(destDir, f))) fs.copyFileSync(path.join(albumDir, f), path.join(destDir, f));
     fs.unlinkSync(src);
     if (rmIfEmpty(albumDir)) rmIfEmpty(artistDir);
-    console.log('collab: filed', r.title, 'under', r.fileUnder);
-  } catch (e) { console.error('collab move failed:', e.message); try { fs.unlinkSync(dest); } catch {} return true; }
-  delete relocs[id]; saveRelocs(); jfScanSoon();
-  return true;
+    console.log('collab: filed', it.Name, 'under', fileUnder);
+    return '';
+  } catch (e) { console.error('collab move failed:', e.message); try { fs.unlinkSync(dest); } catch {} return e.message; }
+}
+// Artists that only exist because of a collab song, and where their songs could go instead
+async function findCollabs() {
+  const tr = await jf('/Items?IncludeItemTypes=Audio&Recursive=true&Fields=Path,AlbumArtist&Limit=50000');
+  const items = tr.Items || [];
+  const byAA = new Map(); // album artist -> {name, songs, albums:Set}
+  for (const t of items) {
+    const aa = t.AlbumArtist || ''; if (!aa) continue;
+    const k = snorm(aa); const v = byAA.get(k) || { name: aa, songs: 0, albums: new Map() };
+    v.songs++; v.albums.set(t.AlbumId, (v.albums.get(t.AlbumId) || 0) + 1); byAA.set(k, v);
+  }
+  const isReal = (v) => v && (v.songs > 2 || [...v.albums.values()].some((n) => n >= 3));
+  const out = [];
+  for (const t of items) {
+    const me = byAA.get(snorm(t.AlbumArtist)); if (!me || isReal(me)) continue;
+    const names = new Set([...(t.Artists || []), ...String(t.AlbumArtist || '').split(/\s*(?:,|&|;|\/|\bfeat\.?|\bft\.?|\bwith\b|\bx\b)\s*/i),
+      ...((String(t.Name || '').match(/\((?:feat\.?|ft\.?|with)\s+([^)]+)\)/i) || [, ''])[1].split(/\s*(?:,|&)\s*/))].map((x) => x.trim()).filter(Boolean));
+    const opts = [...names].map((n) => byAA.get(snorm(n))).filter((v) => isReal(v) && snorm(v.name) !== snorm(t.AlbumArtist))
+      .map((v) => ({ name: v.name, songs: v.songs })).sort((a, b) => b.songs - a.songs);
+    if (opts.length) out.push({ id: t.Id, title: t.Name, from: t.AlbumArtist, album: t.Album || '', options: opts });
+  }
+  return out;
 }
 function relocateLater(id) { // Jellyfin needs a moment to see the new file
   let n = 0; const delays = [15000, 30000, 60000, 120000, 300000];
@@ -973,6 +1006,21 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/cast/wake' && req.method === 'POST') {
       try { await wakeTv(); return send(res, 200, { ok: true }); } catch (e) { return fail(res, 502, e.message); }
     }
+    if (p === '/api/tidy/collabs') return send(res, 200, { songs: await findCollabs() });
+    if (p === '/api/tidy/move' && req.method === 'POST') {
+      const b = await readBody(req);
+      const moves = (Array.isArray(b.moves) ? b.moves : []).slice(0, 500);
+      let ok = 0; const failed = [];
+      for (const mvq of moves) {
+        const id = String(mvq.id || '').replace(/[^\w-]/g, ''); const to = String(mvq.fileUnder || '').trim(); if (!id || !to) continue;
+        const j = await jf(`/Items?Ids=${id}&Fields=Path`); const it = (j.Items || [])[0];
+        if (!it) { failed.push(id); continue; }
+        const r = await moveTrack(it, to);
+        if (r === '' || r === 'already there') ok++; else failed.push(`${it.Name}: ${r || 'file not found'}`);
+      }
+      libIndexCache = null; jfScanSoon();
+      return send(res, 200, { moved: ok, failed });
+    }
     if (p === '/api/yt/status') {
       return send(res, 200, { jobs: Object.fromEntries([...ytJobs].map(([k, v]) => [k, { state: v.state, error: v.error || null, title: v.title || '', artist: v.albumArtist || v.artist || '', album: v.album || '', at: v.at || 0 }])) });
     }
@@ -1041,7 +1089,11 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/library/artists') {
       const start = parseInt(q.get('start') || '0', 10) || 0;
       const j = await jf(`/Artists/AlbumArtists?SortBy=SortName&SortOrder=Ascending&StartIndex=${start}&Limit=120&Fields=PrimaryImageAspectRatio&EnableImages=true`);
-      return send(res, 200, { total: j.TotalRecordCount || 0, artists: (j.Items || []).map(mapJfArtist) });
+      // hide artists that only have 1-2 songs and no album of their own (collab leftovers; their songs are in Singles/Songs)
+      const ix = await getLibIndex().catch(() => null);
+      const small = ix && ix.smallArtists ? ix.smallArtists : new Set();
+      const list = (j.Items || []).filter((i) => !small.has(snorm(i.Name)));
+      return send(res, 200, { total: Math.max(0, (j.TotalRecordCount || 0) - ((j.Items || []).length - list.length)), artists: list.map(mapJfArtist) });
     }
     if ((m = /^\/api\/library\/artist\/([\w-]+)$/.exec(p))) {
       const id = m[1];
