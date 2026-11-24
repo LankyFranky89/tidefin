@@ -141,6 +141,16 @@ html.tv #fs-lyb.tvf{border-radius:50%}
 html.phone #fs-ly .ln{font-size:20px}
 html.fold #fs-ly{max-height:none}html.fold #fs-ly .ln{font-size:17px}
 
+/* ---------- YouTube Music ---------- */
+.tag.yt{background:#3a1212;color:#ff9a9a}
+.qpill{font-size:11px;padding:2px 7px;border-radius:5px;background:rgba(255,255,255,.08);color:var(--dim);margin-right:6px}
+.ytnote{font-size:13px;color:var(--dim);margin:10px 10px 0}
+.ytmodal{max-width:900px!important;padding:14px!important}
+.ytframe{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000}
+.ytframe iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.ytmeta{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px}
+html.phone .ytrow .d .qpill{display:none}
+
 /* ---------- settings page ---------- */
 nav .railonly{display:none}html.tv nav .railonly,html.fold nav .railonly{display:flex}
 html.tv nav button.railonly{order:9}
@@ -1639,7 +1649,12 @@ async function renderSearch() {
   if (!q) { main.innerHTML = '<div class="empty">Type in the search box to find music in your library and on Tidal.</div>'; return; }
   lastQ = q;
   main.innerHTML = `<h2>In your library</h2><div id="lib"><div class="empty">Searching…</div></div>
-    <h2>On Tidal <span class="tag">click ↓ to download to the NAS</span></h2><div id="tid"><div class="empty">Searching…</div></div>`;
+    <h2>On Tidal <span class="tag">Hi-Res FLAC</span></h2><div id="tid"><div class="empty">Searching…</div></div>
+    ${S.youtube ? '<div id="ytsec"></div>' : ''}`;
+  let tidalTracks = null, ytTracks = null;
+  const drawYt = () => { if (tidalTracks && ytTracks && q === lastQ && view.name === 'search') renderYtSection($('#ytsec'), ytTracks, tidalTracks); };
+  if (S.youtube) api(`/api/yt/search?q=${encodeURIComponent(q)}`).then((r) => { ytTracks = r.tracks || []; drawYt(); })
+    .catch((e) => { const el = $('#ytsec'); if (el) el.innerHTML = '<h2>YouTube Music</h2>' + errBox(e); });
   api(`/api/library/search?q=${encodeURIComponent(q)}`).then((r) => {
     if (q !== lastQ || view.name !== 'search') return;
     const list = r.tracks.map((t) => ({ ...t, src: 'jf' }));
@@ -1654,7 +1669,81 @@ async function renderSearch() {
     el.innerHTML = (r.albums.length ? '<div class="sub">Albums · ↓ downloads the whole album</div>' + albumCards(r.albums, 'tidal', true) : '') +
       (list.length ? '<div class="sub">Songs</div>' + trackRows(list) : '') + (!list.length && !r.albums.length ? '<div class="empty">Nothing found on Tidal</div>' : '');
     bindRows(el, list); bindCards(el, r.albums, 'tidal');
-  }).catch((e) => { if ($('#tid')) $('#tid').innerHTML = errBox(e); });
+    tidalTracks = list; drawYt();
+  }).catch((e) => { if ($('#tid')) $('#tid').innerHTML = errBox(e); tidalTracks = []; drawYt(); });
+}
+
+// ---------- YouTube Music: only songs Tidal doesn't have ----------
+const ytState = new Map(); // videoId -> queued | done | error
+function ytKey(artist, title) {
+  return nkey(artist, String(title || '').replace(/\s*[\(\[](official|lyric|audio|video|visualizer|hd|4k)[^\)\]]*[\)\]]/ig, ''));
+}
+function renderYtSection(el, yt, tidal) {
+  if (!el) return;
+  const onTidal = new Set(tidal.map((t) => ytKey(t.artist, t.title)));
+  const shown = yt.filter((t) => !onTidal.has(ytKey(t.artist, t.title)));
+  const hidden = yt.length - shown.length;
+  for (const t of shown) if (!ytState.get(t.id) && trackInLib(t)) ytState.set(t.id, 'done');
+  el.innerHTML = `<h2>YouTube Music <span class="tag yt">Only songs Tidal doesn't have</span></h2>` +
+    (shown.length ? '<div class="rows">' + shown.map((t, i) => `
+      <div class="row ytrow" data-yi="${i}" data-vid="${esc(t.id)}">
+        <div class="n">${i + 1}</div>
+        <div class="th" data-ytplay="${i}" title="Play on YouTube" style="background-image:${bg(t.cover)}"><span class="pb">${I.play}</span></div>
+        <div style="min-width:0"><div class="rt">${esc(t.title)}</div><div class="ra">${esc(t.artist)}${t.album ? ' — ' + esc(t.album) : ''}</div></div>
+        <div class="d"><span class="qpill">AAC 256</span> ${fmt(t.duration)}</div>
+        <button class="${ytBtnClass(t.id)}" data-ytdl="${i}" title="Download from YouTube Music">${ytBtnIcon(t.id)}</button>
+      </div>`).join('') + '</div>' : '<div class="empty">Nothing extra on YouTube Music</div>') +
+    (hidden ? `<div class="ytnote">${hidden} YouTube result${hidden === 1 ? '' : 's'} hidden because Tidal has ${hidden === 1 ? 'it' : 'them'} in better quality</div>` : '');
+  const play = (i) => ytPlayer(shown[i]);
+  el.querySelectorAll('[data-ytplay]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); play(+b.dataset.ytplay); });
+  el.querySelectorAll('.ytrow').forEach((r) => r.onclick = (e) => { if (!e.target.closest('button')) play(+r.dataset.yi); });
+  el.querySelectorAll('[data-ytdl]').forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    const t = shown[+b.dataset.ytdl];
+    if (['queued', 'done'].includes(ytState.get(t.id))) return toast(ytState.get(t.id) === 'done' ? 'Already in your library' : 'Already downloading');
+    ytState.set(t.id, 'queued'); b.className = ytBtnClass(t.id); b.innerHTML = ytBtnIcon(t.id);
+    try {
+      await api('/api/yt/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: t.id, title: t.title, artist: t.artist, album: t.album }) });
+      toast(`Downloading from YouTube Music: ${t.title}`); pollYt();
+    } catch (err) { ytState.set(t.id, 'error'); b.className = ytBtnClass(t.id); b.innerHTML = ytBtnIcon(t.id); toast('YouTube download failed: ' + err.message, true); }
+  });
+}
+const ytBtnClass = (id) => 'ib dl ' + ({ queued: 'queued', done: 'done', error: 'err' }[ytState.get(id)] || '');
+const ytBtnIcon = (id) => ({ queued: I.wait, done: I.ok, error: I.err }[ytState.get(id)] || I.dl);
+let ytTimer = null;
+async function pollYt() {
+  clearTimeout(ytTimer);
+  if (!S.youtube) return;
+  try {
+    const { jobs } = await api('/api/yt/status');
+    let busy = false, done = false;
+    for (const [id, j] of Object.entries(jobs)) {
+      if (ytState.get(id) === 'queued' && j.state === 'done') done = true;
+      if (j.state === 'error' && ytState.get(id) === 'queued') toast('YouTube download failed: ' + (j.error || 'unknown error'), true);
+      ytState.set(id, j.state === 'error' ? 'error' : j.state); if (j.state === 'queued') busy = true;
+    }
+    document.querySelectorAll('[data-ytdl]').forEach((b) => { const row = b.closest('.ytrow'); if (!row) return; });
+    if (view.name === 'search' && $('#ytsec')) document.querySelectorAll('#ytsec [data-ytdl]').forEach((b) => {
+      const i = +b.dataset.ytdl; const id = b.closest('.ytrow') && b.closest('.ytrow').dataset.vid; if (id) { b.className = ytBtnClass(id); b.innerHTML = ytBtnIcon(id); }
+    });
+    if (done) setTimeout(() => loadLibIndex(true), 8000);
+    if (busy) ytTimer = setTimeout(pollYt, 5000);
+  } catch { ytTimer = setTimeout(pollYt, 15000); }
+}
+// Official YouTube player (YouTube's rules: the player must be visible while it plays)
+function ytPlayer(t) {
+  if (!audio.paused) audio.pause();
+  const bgEl = document.createElement('div'); bgEl.className = 'modal-bg';
+  bgEl.innerHTML = `<div class="modal ytmodal" role="dialog" aria-modal="true">
+    <div class="ytframe"><iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(t.id)}?autoplay=1&rel=0&modestbranding=1" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="${esc(t.title)}"></iframe></div>
+    <div class="ytmeta"><div style="min-width:0"><div class="rt">${esc(t.title)}</div><div class="ra" style="color:var(--dim)">${esc(t.artist)} · YouTube Music</div></div>
+    <button class="btn sec" data-c="0">Close</button></div></div>`;
+  const close = () => { bgEl.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  bgEl.onclick = (e) => { if (e.target === bgEl) close(); };
+  bgEl.querySelector('[data-c="0"]').onclick = close;
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(bgEl);
 }
 
 function renderDownloads() {
@@ -1693,7 +1782,7 @@ if (NATIVE) {
 }
 window.__tfReady = true; setLayout();
 if (IS_TV) initTv();
-loadSettings().then(() => { libTab = S.libraryTab || 'artists'; go(S.startPage || 'home', {}, false); });
+loadSettings().then(() => { libTab = S.libraryTab || 'artists'; if (S.youtube) pollYt(); go(S.startPage || 'home', {}, false); });
 applySettings();
 pollQueue();
 </script>

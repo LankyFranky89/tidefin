@@ -16,6 +16,9 @@ const TIDAL_ID = env('TIDAL_CLIENT_ID');
 const TIDAL_SECRET = env('TIDAL_CLIENT_SECRET');
 const COUNTRY = env('TIDAL_COUNTRY', 'NO').toUpperCase();
 const APP_PASSWORD = env('APP_PASSWORD');
+const METUBE_URL = env('METUBE_URL', 'http://127.0.0.1:8081').replace(/\/+$/, '');
+const METUBE_DIR = env('METUBE_DIR', '/metube');   // MeTube's download folder, mounted into Tidefin
+const MUSIC_DIR = env('MUSIC_DIR', '/music');      // your music library (same folder Jellyfin reads)
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // ---------- settings (saved on the NAS, shared by every device) ----------
@@ -328,6 +331,85 @@ async function tidalAlbum(id) {
   };
 }
 
+// ---------- YouTube Music (search) + MeTube (downloads) ----------
+const YT_SONGS = 'EgWKAQIIAWoMEA4QChADEAQQCRAF'; // "Songs" filter (same as ytmusicapi)
+async function ytSearch(q) {
+  const r = await fetch('https://music.youtube.com/youtubei/v1/search?prettyPrint=false', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', Origin: 'https://music.youtube.com' },
+    body: JSON.stringify({ query: q, params: YT_SONGS, context: { client: { clientName: 'WEB_REMIX', clientVersion: '1.20241106.01.00', hl: 'en', gl: 'NO' } } }),
+  });
+  if (!r.ok) throw new Error(`YouTube Music ${r.status}`);
+  const j = await r.json();
+  const out = [];
+  const walk = (o) => {
+    if (!o || typeof o !== 'object') return;
+    if (o.musicResponsiveListItemRenderer) {
+      const it = o.musicResponsiveListItemRenderer;
+      const cols = (it.flexColumns || []).map((c) => (c.musicResponsiveListItemFlexColumnRenderer?.text?.runs || []));
+      const videoId = it.playlistItemData?.videoId || it.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.videoId;
+      if (videoId && cols[0] && cols[0][0]) {
+        const meta = (cols[1] || []).map((x) => x.text);
+        const parts = meta.join('').split(' • ');
+        const artist = (cols[1] || []).filter((x) => x.navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType === 'MUSIC_PAGE_TYPE_ARTIST').map((x) => x.text).join(', ') || parts[0] || '';
+        const album = (cols[1] || []).find((x) => x.navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType === 'MUSIC_PAGE_TYPE_ALBUM')?.text || '';
+        const dur = parts.find((x) => /^\d+:\d{2}(:\d{2})?$/.test(x.trim())) || '';
+        const thumbs = it.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails || [];
+        const sec = dur ? dur.trim().split(':').reduce((a, b) => a * 60 + +b, 0) : null;
+        out.push({ id: videoId, title: cols[0][0].text, artist, album, duration: sec, cover: (thumbs[thumbs.length - 1] || {}).url || null });
+      }
+      return;
+    }
+    for (const k in o) walk(o[k]);
+  };
+  walk(j.contents);
+  return out.slice(0, 20);
+}
+
+// jobs we sent to MeTube: videoId -> {artist, album, title, state}
+const ytJobs = new Map();
+const YT_JOBS_FILE = path.join(DATA_DIR, 'youtube-jobs.json');
+try { for (const [k, v] of Object.entries(JSON.parse(fs.readFileSync(YT_JOBS_FILE, 'utf8')))) ytJobs.set(k, v); } catch {}
+const saveYtJobs = () => { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(YT_JOBS_FILE, JSON.stringify(Object.fromEntries(ytJobs))); } catch {} };
+const safeName = (x) => String(x || 'Unknown').replace(/[\/\\:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Unknown';
+
+async function ytDownload(job) {
+  const r = await fetch(`${METUBE_URL}/add`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: `https://music.youtube.com/watch?v=${job.id}`, quality: 'best', format: 'm4a', auto_start: true }),
+  });
+  if (!r.ok) throw new Error(`MeTube refused (${r.status})`);
+  ytJobs.set(job.id, { ...job, state: 'queued', at: Date.now() }); saveYtJobs();
+}
+
+// Every 15 s: move songs MeTube has finished into Music/Artist/Album and ask Jellyfin to rescan.
+async function ytSweep() {
+  const pending = [...ytJobs.values()].filter((j) => j.state === 'queued');
+  if (!pending.length) return;
+  let hist;
+  try { hist = await (await fetch(`${METUBE_URL}/history`)).json(); } catch { return; }
+  const all = [...(hist.done || []), ...(hist.queue || []), ...(hist.pending || [])];
+  let moved = 0;
+  for (const job of pending) {
+    const it = all.find((x) => (x.url || '').includes(job.id) || x.id === job.id);
+    if (!it) { if (Date.now() - job.at > 6 * 3600e3) { job.state = 'error'; job.error = 'MeTube lost the download'; } continue; }
+    if (it.status === 'error') { job.state = 'error'; job.error = it.msg || 'MeTube error'; continue; }
+    if (it.status !== 'finished' || !it.filename) continue;
+    try {
+      const src = path.join(METUBE_DIR, it.filename);
+      const ext = path.extname(it.filename) || '.m4a';
+      const dir = path.join(MUSIC_DIR, safeName(job.artist.split(',')[0]), safeName(job.album || 'YouTube Music'));
+      fs.mkdirSync(dir, { recursive: true });
+      const dest = path.join(dir, safeName(job.title) + ext);
+      try { fs.renameSync(src, dest); } catch { fs.copyFileSync(src, dest); fs.unlinkSync(src); } // different disks/shares
+      job.state = 'done'; job.path = dest; moved++;
+    } catch (e) { job.state = 'error'; job.error = 'Could not move file: ' + e.message; }
+  }
+  saveYtJobs();
+  if (moved) { libIndexCache = null; jf('/Library/Refresh', { method: 'POST' }).catch(() => {}); }
+}
+setInterval(() => { if (settings.youtube) ytSweep().catch((e) => console.error('youtube sweep:', e.message)); }, 15000);
+
 // ---------- Tidarr ----------
 async function tidarr(p, opts = {}) {
   if (!TD_URL || !TD_KEY) throw new Error('Tidarr is not configured (TIDARR_URL / TIDARR_API_KEY)');
@@ -428,6 +510,22 @@ const server = http.createServer(async (req, res) => {
       }
       console.log(new Date().toISOString(), 'deleted', b.type, id, `(${ids.length} item(s))`);
       return send(res, 200, { ok: true, deleted: ids.length });
+    }
+    if (p === '/api/yt/search') {
+      if (!settings.youtube) return send(res, 200, { off: true, tracks: [] });
+      const term = (q.get('q') || '').trim();
+      return send(res, 200, { tracks: term ? await ytSearch(term) : [] });
+    }
+    if (p === '/api/yt/download' && req.method === 'POST') {
+      if (!settings.youtube) return fail(res, 400, 'YouTube Music is turned off in Settings');
+      const b = await readBody(req);
+      const id = String(b.id || '').replace(/[^\w-]/g, '');
+      if (!id) return fail(res, 400, 'Missing video id');
+      await ytDownload({ id, title: b.title || id, artist: b.artist || 'Unknown artist', album: b.album || '' });
+      return send(res, 200, { ok: true });
+    }
+    if (p === '/api/yt/status') {
+      return send(res, 200, { jobs: Object.fromEntries([...ytJobs].map(([k, v]) => [k, { state: v.state, error: v.error || null }])) });
     }
     if (p === '/api/settings') {
       if (req.method === 'POST') return send(res, 200, saveSettings(await readBody(req)));

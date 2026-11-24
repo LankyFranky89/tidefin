@@ -10,7 +10,9 @@ services:
     command: ["node", "server.js"]
     network_mode: host        # app listens on NAS port 8585 and reaches Jellyfin/Tidarr via 127.0.0.1
     volumes:
-      - /volume1/docker/tidefin/app:/app:ro
+      - /volume1/docker/tidefin/app:/app
+      - /volume1/docker/metube/downloads:/metube   # YouTube Music downloads (MeTube)
+      - /volume1/Media/Music:/music                # your music library
     environment:
       - PORT=8585
       - TZ=Europe/Oslo
