@@ -1637,6 +1637,31 @@ async function renderAlbums() {
   } catch (e) { main.innerHTML = libHeader() + errBox(e); bindLibHeader(); }
 }
 
+// Album page: other albums by the same artist (yours, then the ones on Tidal you don't have)
+async function moreByArtist(a) {
+  const vid = view.id, still = () => view.name === 'album' && view.id === vid;
+  let mine = [];
+  if (a.artistId) {
+    try {
+      const ar = await api(`/api/library/artist/${a.artistId}`);
+      if (!still()) return;
+      mine = ar.albums.filter((x) => x.id !== a.id);
+      if (mine.length) { const box = $('#amore'); box.innerHTML = `<h2>More by ${esc(a.artist)}</h2><div class="more-tidal">${albumCards(mine, 'jf')}</div>`; bindCards(box, mine, 'jf'); }
+    } catch {}
+  }
+  if (!a.artist) return;
+  try {
+    const t = await api(`/api/tidal/artist?name=${encodeURIComponent(a.artist)}`);
+    if (!still() || !t.artist) return;
+    const have = new Set([a, ...mine].map((x) => normTitle(x.title)));
+    const missing = t.albums.filter((x) => !have.has(normTitle(x.title)) && !albumInLib({ ...x, artist: x.artist || a.artist }));
+    if (!missing.length) return;
+    const label = { ALBUM: 'Album', EP: 'EP', SINGLE: 'Single' };
+    const box = $('#amtidal');
+    box.innerHTML = `<h2>More on Tidal <span class="tag">${missing.length} not in your library</span></h2><div class="more-tidal">${albumCards(missing.map((x) => ({ ...x, year: [label[x.type] || '', x.year].filter(Boolean).join(' · ') })), 'tidal')}</div>`;
+    bindCards(box, missing, 'tidal');
+  } catch {}
+}
 async function renderAlbum() {
   loading();
   try {
@@ -1646,10 +1671,12 @@ async function renderAlbum() {
       <div class="hero"><div class="art" style="background-image:${a.hasImage ? jfImg(a.id, 500) : 'none'}"></div>
       <div><div class="meta">Album · In your library</div><h1>${esc(a.title)}</h1><div class="meta">${esc(a.artist)}${a.year ? ' · ' + a.year : ''} · ${list.length} tracks</div>
       <div class="acts"><button class="btn" id="pa">${I.play.replace('<svg', '<svg width="16"')} Play</button><button class="ib more" id="amenu" title="More">${IMORE}</button></div></div></div>
-      <div id="tr">${trackRows(list, { showThumb: false, numbered: true })}</div>`;
+      <div id="tr">${trackRows(list, { showThumb: false, numbered: true })}</div>
+      <div id="amore"></div><div id="amtidal"></div>`;
     $('#amenu').onclick = (e) => { e.stopPropagation(); openMenu($('#amenu'), [{ label: 'Delete album', danger: true, icon: ITRASH, run: () => deleteItem('album', a, () => { history_.length ? $('#back').click() : go('library', {}, false); }) }]); };
     bindBack(); bindRows($('#tr'), list);
     $('#pa').onclick = () => list.length && playList(list, 0);
+    moreByArtist(a);
   } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }
 }
 

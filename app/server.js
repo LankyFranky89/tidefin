@@ -569,7 +569,7 @@ const server = http.createServer(async (req, res) => {
       ]);
       const a = (info.Items || [])[0];
       if (!a) return fail(res, 404, 'Album not found');
-      return send(res, 200, { ...mapJfAlbum(a), tracks: (tr.Items || []).map(mapJfTrack) });
+      return send(res, 200, { ...mapJfAlbum(a), artistId: (a.AlbumArtists && a.AlbumArtists[0] && a.AlbumArtists[0].Id) || null, tracks: (tr.Items || []).map(mapJfTrack) });
     }
     if (p === '/api/library/delete' && req.method === 'POST') {
       // Permanently deletes media files through Jellyfin. type: song | album | artist
