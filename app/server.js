@@ -18,6 +18,36 @@ const COUNTRY = env('TIDAL_COUNTRY', 'NO').toUpperCase();
 const APP_PASSWORD = env('APP_PASSWORD');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
+// ---------- settings (saved on the NAS, shared by every device) ----------
+const DATA_DIR = path.join(__dirname, 'data');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+const DEFAULT_SETTINGS = {
+  youtube: false,                 // YouTube Music source (via MeTube)
+  accent: 'cover',                // 'cover' or a hex colour
+  glass: 'strong',                // off | subtle | strong
+  textSize: 'normal',             // normal | large | xl
+  startPage: 'home',              // home | library | search
+  libraryTab: 'artists',          // artists | albums | songs | genres
+  homeShelves: ['recent', 'added', 'new', 'artists'], // order = display order; missing = hidden
+  ownedPct: 80,                   // album counts as owned at this % of its songs
+  releaseTypes: ['studio'],       // studio, ep, single, live, compilation, deluxe
+  confirmBig: true,               // ask before album / discography downloads
+  lookbackMonths: 12,             // new-release shelf
+};
+let settings = { ...DEFAULT_SETTINGS };
+try { settings = { ...DEFAULT_SETTINGS, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) }; } catch {}
+function saveSettings(patch) {
+  const allowed = Object.keys(DEFAULT_SETTINGS);
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (!allowed.includes(k)) continue;
+    if (typeof v !== typeof DEFAULT_SETTINGS[k] && !(Array.isArray(DEFAULT_SETTINGS[k]) && Array.isArray(v))) continue;
+    settings[k] = v;
+  }
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2)); }
+  catch (e) { console.error('could not save settings:', e.message); }
+  return settings;
+}
+
 // ---------- helpers ----------
 function send(res, code, body, type = 'application/json') {
   const data = type === 'application/json' ? JSON.stringify(body) : body;
@@ -211,6 +241,20 @@ async function tidalSearch(q) {
   return { tracks, albums };
 }
 
+// Which kind of release is this? (studio / ep / single / live / compilation / deluxe)
+const LIVE_RE = /\b(live|unplugged|in concert|concert|on stage|bootleg|tour edition)\b/i;
+const COMP_RE = /\b(best of|greatest hits|the very best|collection|anthology|essentials?|the hits|b-sides|rarities|demos?|remixe?s|karaoke|instrumentals?)\b/i;
+const DELUXE_RE = /\b(deluxe|expanded|anniversary|bonus|special edition|remaster(ed)?|reissue)\b/i;
+function releaseKind(a) {
+  if (a.type === 'SINGLE') return 'single';
+  if (a.type === 'EP') return 'ep';
+  if (LIVE_RE.test(a.title || '')) return 'live';
+  if (COMP_RE.test(a.title || '')) return 'compilation';
+  if (DELUXE_RE.test(a.title || '')) return 'deluxe';
+  return 'studio';
+}
+function releaseAllowed(a, types) { const k = releaseKind(a); return types.includes(k) || (k === 'deluxe' && types.includes('studio') && !types.includes('nodeluxe')); }
+
 async function tidalArtistAlbums(name) {
   const sDoc = await tidal('/searchResults', [['filter[query]', name], ['include', 'artists']]);
   const sRes = Array.isArray(sDoc.data) ? sDoc.data[0] : sDoc.data;
@@ -385,6 +429,10 @@ const server = http.createServer(async (req, res) => {
       console.log(new Date().toISOString(), 'deleted', b.type, id, `(${ids.length} item(s))`);
       return send(res, 200, { ok: true, deleted: ids.length });
     }
+    if (p === '/api/settings') {
+      if (req.method === 'POST') return send(res, 200, saveSettings(await readBody(req)));
+      return send(res, 200, settings);
+    }
     if (p === '/api/lyrics') {
       // Synced lyrics from LRCLIB (free, open lyrics database).
       const artist = (q.get('artist') || '').split(',')[0].trim();
@@ -415,14 +463,15 @@ const server = http.createServer(async (req, res) => {
       const names = (q.get('artists') || '').split('|').map((x) => x.trim()).filter(Boolean).slice(0, 10);
       const norm = (x) => String(x || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^a-z0-9]/g, '');
       const owned = new Set(((libIndexCache && libIndexCache.albums) || []).map(([ar, t]) => norm(ar) + '|' + norm(t)));
-      const cutoff = new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
+      const cutoff = new Date(Date.now() - (settings.lookbackMonths || 12) * 30.5 * 864e5).toISOString().slice(0, 10);
+      const types = settings.releaseTypes || ['studio'];
       const out = [];
       for (const n of names) { // one artist at a time: Tidal rate-limits bursts
         try {
           let c = artistAlbumCache.get(n.toLowerCase());
           if (!c || Date.now() - c.at > 6 * 3600e3) { c = { at: Date.now(), data: await tidalArtistAlbums(n) }; artistAlbumCache.set(n.toLowerCase(), c); }
           for (const al of c.data.albums || []) {
-            if ((al.date || '') < cutoff || al.type === 'SINGLE') continue;
+            if ((al.date || '') < cutoff || !releaseAllowed(al, types)) continue;
             if (owned.has(norm(n) + '|' + norm(al.title))) continue;
             out.push(al);
           }
