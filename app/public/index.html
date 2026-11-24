@@ -465,6 +465,14 @@ html.tv .navring .ring b{font-size:13px}
 .castb.on{color:var(--accent)!important}
 html.tv .castb{display:none}
 nav button .navring svg{display:block!important;width:100%!important;height:100%!important}
+@keyframes navFwd{from{transform:translateX(48px);opacity:0}to{transform:none;opacity:1}}
+@keyframes navBack{from{transform:translateX(-48px);opacity:0}to{transform:none;opacity:1}}
+@keyframes navTab{from{opacity:0}to{opacity:1}}
+main.nav-fwd{animation:navFwd .25s cubic-bezier(.2,.8,.2,1)}
+main.nav-back{animation:navBack .25s cubic-bezier(.2,.8,.2,1)}
+main.nav-tab{animation:navTab .18s ease-out}
+html.tv main.nav-fwd,html.tv main.nav-back{animation-duration:.3s}
+@media (prefers-reduced-motion:reduce){main.nav-fwd,main.nav-back,main.nav-tab{animation:none}}
 </style>
 </head>
 <body>
@@ -1288,6 +1296,10 @@ function go(name, args = {}, push = true, fromPop = false) {
   if (name === 'search' && document.documentElement.classList.contains('phone') && !$('#q').value) setTimeout(() => $('#q').focus(), 50);
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.v === name || (['album', 'artist', 'genre'].includes(name) && b.dataset.v === 'library') || (name === 'ytAlbum' && b.dataset.v === 'search') || (name === 'tidalAlbum' && b.dataset.v === 'search')));
   main.scrollTop = 0;
+  // page transition: forward slides in from the right, back from the left, tabs fade
+  const anim = fromPop ? 'nav-back' : push ? 'nav-fwd' : (prevName && prevName !== name ? 'nav-tab' : '');
+  main.classList.remove('nav-back', 'nav-fwd', 'nav-tab');
+  if (anim) { void main.offsetWidth; main.classList.add(anim); clearTimeout(go._t); go._t = setTimeout(() => main.classList.remove(anim), 400); }
   ({ settings: renderSettings, ytAlbum: renderYtAlbum, home: renderHome, library: renderLibrary, search: renderSearch, downloads: renderDownloads, album: renderAlbum, tidalAlbum: renderTidalAlbum, artist: renderArtist, genre: renderGenre })[name]();
 }
 const backBtn = () => history_.length ? '<button class="back" id="back">← Back</button>' : '';
