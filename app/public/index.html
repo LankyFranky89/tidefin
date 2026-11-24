@@ -448,6 +448,14 @@ nav button[data-v="downloads"]{position:relative}
 .navring{position:absolute;width:22px;height:22px;top:2px;right:2px;border-radius:50%;background:rgba(10,14,18,.85);pointer-events:none}
 .navring .ring b{font-size:9px}
 .tmh{font-size:15px;margin:14px 0 8px;color:var(--dim);font-weight:600}
+.modal.fanrev{width:min(640px,94vw);max-height:86vh;display:flex;flex-direction:column}
+.fanrev .frl{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim);margin-bottom:10px}
+.fanrev select,.fanrev input{padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.3);color:var(--text);font:inherit;font-size:14px;width:100%;box-sizing:border-box}
+.fanrev .frg{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fanrev .frrows{overflow:auto;flex:1;min-height:120px;display:flex;flex-direction:column;gap:8px;margin:6px 0 12px;padding-right:4px}
+.fanrev .frrow{display:grid;grid-template-columns:28px 1fr;gap:8px;align-items:start}
+.fanrev .frn{color:var(--dim);font-size:13px;padding-top:9px;text-align:right}
+.fanrev .fryt{font-size:11px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 </style>
 </head>
 <body>
@@ -1863,7 +1871,7 @@ function renderYtSection(el, yt, tidal, showAll) {
     e.stopPropagation();
     const a = albums[+b.dataset.yadl];
     if (S.confirmBig && !(await confirmBoxPlain('Download album?', `<b style="color:var(--text)">${esc(a.title)}</b> by ${esc(a.artist)} will be downloaded from YouTube Music.`, 'Download'))) return;
-    try { const al = await api('/api/yt/album/' + a.id); await ytQueue(al.tracks.map((t) => ({ ...t, album: al.title || a.title, artist: t.artist || a.artist }))); b.innerHTML = I.wait; b.className = 'ib dl queued'; }
+    try { const al = await api('/api/yt/album/' + a.id); if (isFanAlbum(a.id)) { await fanAlbumQueue({ ...al, cover: al.cover || a.cover }, al.tracks); return; } await ytQueue(al.tracks.map((t) => ({ ...t, album: al.title || a.title, artist: t.artist || a.artist }))); b.innerHTML = I.wait; b.className = 'ib dl queued'; }
     catch (err) { toast('YouTube download failed: ' + err.message, true); }
   });
   const play = (i) => ytPlayer(songs[i]);
@@ -1876,12 +1884,71 @@ function renderYtSection(el, yt, tidal, showAll) {
     try { await ytQueue([t], true); } catch (err) { toast('YouTube download failed: ' + err.message, true); }
   });
 }
+// ---------- fan-uploaded albums: fix names with MusicBrainz before downloading ----------
+const isFanAlbum = (id) => /^VL/.test(id || '');
+function mainArtist(tracks, fallback) {
+  const c = new Map(); for (const t of tracks) { const a = (t.artist || '').split(',')[0].trim(); if (a) c.set(a, (c.get(a) || 0) + 1); }
+  return [...c].sort((a, b) => b[1] - a[1])[0]?.[0] || fallback || 'Unknown artist';
+}
+async function fanAlbumQueue(al, picked) {
+  if (!picked.length) return;
+  const artist = mainArtist(al.tracks, al.artist);
+  toast('Looking up the right song names…');
+  let m;
+  try { m = await api('/api/yt/match', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artist, album: al.title, titles: picked.map((t) => t.title) }) }); }
+  catch { m = { album: al.title, confident: false, candidates: [], cleaned: picked.map((t) => t.title) }; }
+  const build = (cand, names, albumName, artistName) => picked.map((t, i) => ({
+    ...t, title: names[i], artist: artistName, albumArtist: artistName, album: albumName,
+    number: cand ? (cand.map[i]?.n || null) : (t.number || i + 1), total: cand ? cand.total : picked.length,
+    year: cand ? cand.year : al.year, cover: cand ? cand.cover : (al.cover || t.cover), coverFallback: al.cover || t.cover,
+  }));
+  if (m.confident) {
+    const c = m.candidates[0];
+    toast(`Matched "${c.title}" (${c.year || '?'}) on MusicBrainz`);
+    return ytQueue(build(c, picked.map((t, i) => c.map[i]?.title || m.cleaned[i]), c.title, artist));
+  }
+  const items = await fanReview(m, picked, artist, build);
+  if (items) await ytQueue(items);
+}
+function fanReview(m, picked, artist, build) {
+  return new Promise((resolve) => {
+    const bgEl = document.createElement('div'); bgEl.className = 'modal-bg';
+    const opts = m.candidates.map((c, i) => `<option value="${i}">${esc(c.title)} · ${esc(c.artist)}${c.year ? ' · ' + c.year : ''} · ${c.total} songs (${Math.round(c.trackScore * 100)}% match)</option>`).join('');
+    bgEl.innerHTML = `<div class="modal fanrev" role="dialog" aria-modal="true"><h3>Check song names</h3>
+      <p>${m.candidates.length ? 'Not a sure match on MusicBrainz. Pick the right release, or fix the names yourself.' : 'No match found on MusicBrainz' + (m.error ? ' (' + esc(m.error) + ')' : '') + '. The names below are cleaned up from YouTube; fix anything that\'s wrong.'}</p>
+      <label class="frl">Release<select id="fr-rel">${opts}<option value="-1">No match, use cleaned YouTube names</option></select></label>
+      <div class="frg"><label class="frl">Artist<input id="fr-art"></label><label class="frl">Album<input id="fr-alb"></label></div>
+      <div class="frrows">${picked.map((t, i) => `<div class="frrow"><span class="frn" data-frn="${i}"></span><div><input data-frt="${i}"><div class="fryt">YouTube: ${esc(t.title)}</div></div></div>`).join('')}</div>
+      <div class="acts"><button class="btn sec" data-c="0">Cancel</button><button class="btn" data-c="1">Download ${picked.length} song${picked.length === 1 ? '' : 's'}</button></div></div>`;
+    const sel = bgEl.querySelector('#fr-rel'), cand = () => m.candidates[+sel.value] || null;
+    const fill = () => {
+      const c = cand();
+      bgEl.querySelector('#fr-art').value = artist;
+      bgEl.querySelector('#fr-alb').value = c ? c.title : m.album;
+      picked.forEach((t, i) => {
+        const mm = c && c.map[i];
+        bgEl.querySelector(`[data-frt="${i}"]`).value = mm ? mm.title : m.cleaned[i];
+        bgEl.querySelector(`[data-frn="${i}"]`).textContent = c ? (mm ? mm.n : '?') : (t.number || i + 1);
+      });
+    };
+    sel.value = m.candidates.length ? '0' : '-1'; sel.onchange = fill; fill();
+    const done = (v) => { bgEl.remove(); resolve(v); };
+    bgEl.onclick = (e) => { if (e.target === bgEl) done(null); };
+    bgEl.querySelector('[data-c="0"]').onclick = () => done(null);
+    bgEl.querySelector('[data-c="1"]').onclick = () => {
+      const names = picked.map((_, i) => bgEl.querySelector(`[data-frt="${i}"]`).value.trim() || picked[i].title);
+      const art = bgEl.querySelector('#fr-art').value.trim() || artist, alb = bgEl.querySelector('#fr-alb').value.trim() || m.album;
+      done(build(cand(), names, alb, art));
+    };
+    document.body.appendChild(bgEl);
+  });
+}
 async function ytQueue(items, single) {
   items = items.filter((t) => !['queued', 'done'].includes(ytState.get(t.id)));
   if (!items.length) return toast('Already in your library or downloading');
   items.forEach((t) => ytState.set(t.id, 'queued')); refreshYtButtons();
   try {
-    await api('/api/yt/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ single: !!single, items: items.map((t) => ({ id: t.id, title: t.title, artist: t.artist, album: t.album, number: t.number })) }) });
+    await api('/api/yt/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ single: !!single, items: items.map((t) => ({ id: t.id, title: t.title, artist: t.artist, album: t.album, number: t.number, albumArtist: t.albumArtist, total: t.total, year: t.year, cover: t.cover, coverFallback: t.coverFallback })) }) });
     toast(items.length === 1 ? `Downloading from YouTube Music: ${items[0].title}` : `Downloading ${items.length} songs from YouTube Music`);
     pollYt();
   } catch (err) { items.forEach((t) => ytState.set(t.id, 'error')); refreshYtButtons(); throw err; }
@@ -1917,8 +1984,9 @@ async function renderYtAlbum() {
     boxes.forEach((b) => b.onchange = upd); upd();
     main.querySelectorAll('[data-ytplay]').forEach((b) => b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); ytPlayer(list[+b.dataset.ytplay], a.playlistId); });
     $('#ya-play').onclick = () => list.length && ytPlayer(list[0], a.playlistId);
-    $('#ya-sel').onclick = async () => { try { await ytQueue(boxes.filter((b) => b.checked && !b.disabled).map((b) => list[+b.dataset.yck])); } catch (e) { toast(e.message, true); } };
-    $('#ya-all').onclick = async () => { try { await ytQueue(list); } catch (e) { toast(e.message, true); } };
+    const fan = isFanAlbum(view.id), q = (l) => fan ? fanAlbumQueue({ ...a, cover }, l) : ytQueue(l);
+    $('#ya-sel').onclick = async () => { try { await q(boxes.filter((b) => b.checked && !b.disabled).map((b) => list[+b.dataset.yck])); } catch (e) { toast(e.message, true); } };
+    $('#ya-all').onclick = async () => { try { await q(list); } catch (e) { toast(e.message, true); } };
   } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }
 }
 const ytBtnClass = (id) => 'ib dl ' + ({ queued: 'queued', done: 'done', error: 'err' }[ytState.get(id)] || '');

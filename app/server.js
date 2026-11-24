@@ -5,6 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { Readable } = require('stream');
+const { execFile } = require('child_process');
 
 const env = (k, d = '') => (process.env[k] || d).trim();
 const PORT = parseInt(env('PORT', '8585'), 10);
@@ -482,6 +483,104 @@ async function ytDownload(job) {
   ytJobs.set(job.id, { ...job, state: 'queued', at: Date.now() }); saveYtJobs();
 }
 
+// ---------- tags: write correct names, numbers and cover into YouTube downloads (ffmpeg) ----------
+let ffmpegReady = null;
+function ensureFfmpeg() {
+  if (!ffmpegReady) ffmpegReady = new Promise((res) => {
+    execFile('ffmpeg', ['-version'], (e) => {
+      if (!e) return res(true);
+      console.log('installing ffmpeg for tagging…');
+      execFile('apk', ['add', '--no-cache', 'ffmpeg'], { timeout: 300000 }, (e2) => {
+        if (e2) { console.error('ffmpeg install failed:', e2.message); ffmpegReady = null; return res(false); }
+        res(true);
+      });
+    });
+  });
+  return ffmpegReady;
+}
+const run = (cmd, args) => new Promise((res, rej) => execFile(cmd, args, { timeout: 120000 }, (e, so, se) => e ? rej(new Error((se || e.message).slice(-300))) : res()));
+async function tagFile(file, job) {
+  if (!(await ensureFfmpeg())) return;
+  const dir = path.dirname(file);
+  let cov = null;
+  for (const u of [job.cover, job.coverFallback].filter(Boolean)) {
+    if (cov) break;
+    try {
+      const r = await fetch(u);
+      if (r.ok) {
+        cov = file + '.cover.jpg'; fs.writeFileSync(cov, Buffer.from(await r.arrayBuffer()));
+        const folderCov = path.join(dir, 'cover.jpg'); if (!fs.existsSync(folderCov)) fs.copyFileSync(cov, folderCov);
+      }
+    } catch {}
+  }
+  const tmp = file + '.tagging' + path.extname(file);
+  const md = { title: job.title, artist: job.artist, album_artist: job.albumArtist || job.artist, album: job.album, date: job.year, track: job.number ? (job.total ? `${job.number}/${job.total}` : String(job.number)) : null };
+  const args = ['-y', '-loglevel', 'error', '-i', file];
+  if (cov) args.push('-i', cov, '-map', '0:a', '-map', '1:v', '-c', 'copy', '-disposition:v:0', 'attached_pic');
+  else args.push('-map', '0:a', '-c', 'copy');
+  for (const [k, v] of Object.entries(md)) if (v) args.push('-metadata', `${k}=${v}`);
+  args.push(tmp);
+  try { await run('ffmpeg', args); fs.renameSync(tmp, file); }
+  catch (e) { console.error('tagging failed:', path.basename(file), e.message); try { fs.unlinkSync(tmp); } catch {} }
+  if (cov) try { fs.unlinkSync(cov); } catch {}
+}
+
+// ---------- MusicBrainz: match fan-uploaded albums to the official tracklist ----------
+const MB_UA = 'Tidefin/1.0 ( https://github.com/LankyFranky89/tidefin )';
+let mbLast = 0;
+async function mb(p) {
+  const wait = mbLast + 1100 - Date.now(); if (wait > 0) await new Promise((r) => setTimeout(r, wait)); // 1 request/second
+  mbLast = Date.now();
+  const r = await fetch('https://musicbrainz.org/ws/2/' + p + (p.includes('?') ? '&' : '?') + 'fmt=json', { headers: { 'User-Agent': MB_UA, Accept: 'application/json' } });
+  if (!r.ok) throw new Error('MusicBrainz ' + r.status);
+  return r.json();
+}
+const words = (x) => String(x || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+function sim(a, b) { // word overlap 0..1
+  const A = words(a), B = words(b); if (!A.length || !B.length) return 0;
+  const sb = new Set(B); const hit = A.filter((w) => sb.has(w)).length;
+  return (2 * hit) / (A.length + B.length);
+}
+function cleanTitle(t, artist) {
+  let x = String(t || '');
+  x = x.replace(/[([](official|lyric|lyrics|audio|video|hd|hq|4k|remaster(ed)?|visuali[sz]er|full album|explicit)[^)\]]*[)\]]/gi, '');
+  x = x.replace(/^\s*(track\s*)?\d{1,2}\s*[.)\-:]\s*/i, '');
+  for (const a of String(artist || '').split(',')) { const n = a.trim(); if (n) x = x.replace(new RegExp('^\\s*' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[-–—:|]\\s*', 'i'), ''); }
+  return x.replace(/[([]\s*[)\]]/g, '').replace(/\s{2,}/g, ' ').replace(/\s*[-–—|]\s*$/, '').trim() || String(t || '');
+}
+function cleanAlbum(t, artist) {
+  return cleanTitle(String(t || '').replace(/\b(full\s*album|complete\s*album|full\s*ep|album\s*completo)\b/gi, '').replace(/[([]\s*(19|20)\d{2}\s*[)\]]/g, ''), artist);
+}
+async function mbMatch(artist, album, ytTitles) {
+  const alb = cleanAlbum(album, artist);
+  const q = `release:"${alb.replace(/"/g, '')}"` + (artist ? ` AND artist:"${artist.replace(/"/g, '')}"` : '');
+  const s = await mb('release/?limit=10&query=' + encodeURIComponent(q));
+  const rels = (s.releases || []).map((r) => ({ id: r.id, title: r.title, artist: (r['artist-credit'] || []).map((c) => c.name + (c.joinphrase || '')).join(''), year: (r.date || '').slice(0, 4) || null, count: r['track-count'] || 0, score: r.score || 0 }))
+    .filter((r) => sim(r.title, alb) >= 0.5);
+  // prefer releases whose track count matches the upload, then by search score; look at the best 3
+  rels.sort((a, b) => (Math.abs(a.count - ytTitles.length) - Math.abs(b.count - ytTitles.length)) || (b.score - a.score));
+  const cands = [];
+  for (const r of rels.slice(0, 3)) {
+    try {
+      const d = await mb(`release/${r.id}?inc=recordings+artist-credits`);
+      const tracks = []; for (const m of d.media || []) for (const t of m.tracks || []) tracks.push({ n: tracks.length + 1, title: t.title, length: t.length ? Math.round(t.length / 1000) : null });
+      const map = ytTitles.map((yt, i) => {
+        const c = cleanTitle(yt, artist); let best = null, bs = 0;
+        for (const t of tracks) { const v = sim(c, t.title); if (v > bs) { bs = v; best = t; } }
+        if (bs < 0.5 && tracks.length === ytTitles.length) { best = tracks[i]; bs = 0.5; } // same length: fall back to position
+        return best && bs >= 0.5 ? { n: best.n, title: best.title, score: +bs.toFixed(2) } : null;
+      });
+      const matched = map.filter(Boolean);
+      const trackScore = matched.length ? matched.reduce((a, b) => a + b.score, 0) / ytTitles.length : 0;
+      cands.push({ ...r, total: tracks.length, tracks, map, trackScore: +trackScore.toFixed(2), cover: `https://coverartarchive.org/release/${r.id}/front-500` });
+    } catch (e) { console.error('musicbrainz:', e.message); }
+  }
+  cands.sort((a, b) => b.trackScore - a.trackScore);
+  const top = cands[0];
+  const confident = !!top && top.trackScore >= 0.8 && Math.abs(top.total - ytTitles.length) <= 1 && new Set(top.map.filter(Boolean).map((m) => m.n)).size === top.map.filter(Boolean).length;
+  return { album: alb, confident, candidates: cands, cleaned: ytTitles.map((t) => cleanTitle(t, artist)) };
+}
+
 // Every 15 s: move songs MeTube has finished into Music/Artist/Album and ask Jellyfin to rescan.
 async function ytSweep() {
   const pending = [...ytJobs.values()].filter((j) => j.state === 'queued');
@@ -502,6 +601,7 @@ async function ytSweep() {
       fs.mkdirSync(dir, { recursive: true });
       const dest = path.join(dir, (job.number ? String(job.number).padStart(2, '0') + ' ' : '') + safeName(job.title) + ext);
       try { fs.renameSync(src, dest); } catch { fs.copyFileSync(src, dest); fs.unlinkSync(src); } // different disks/shares
+      await tagFile(dest, job);
       job.state = 'done'; job.path = dest; moved++;
     } catch (e) { job.state = 'error'; job.error = 'Could not move file: ' + e.message; }
   }
@@ -657,12 +757,19 @@ const server = http.createServer(async (req, res) => {
       for (const it of items.slice(0, 200)) {
         const id = String(it.id || '').replace(/[^\w-]/g, '');
         if (!id) continue;
-        await ytDownload({ id, title: it.title || id, artist: it.artist || 'Unknown artist', album: it.album || '', number: it.number || null });
+        await ytDownload({ id, title: it.title || id, artist: it.artist || 'Unknown artist', albumArtist: it.albumArtist || '', album: it.album || '', number: it.number || null, total: it.total || null, year: it.year || null, cover: /^https:\/\//.test(it.cover || '') ? it.cover : null, coverFallback: /^https:\/\//.test(it.coverFallback || '') ? it.coverFallback : null });
         n++;
       }
       if (!n) return fail(res, 400, 'Missing video id');
       if (b.single && n === 1) { const it = items[0]; addSingle(it.artist, it.title); libIndexCache = null; }
       return send(res, 200, { ok: true, queued: n });
+    }
+    if (p === '/api/yt/match' && req.method === 'POST') {
+      const b = await readBody(req);
+      const titles = (Array.isArray(b.titles) ? b.titles : []).slice(0, 100).map(String);
+      if (!b.album || !titles.length) return fail(res, 400, 'Missing album or songs');
+      try { return send(res, 200, await mbMatch(String(b.artist || ''), String(b.album), titles)); }
+      catch (e) { return send(res, 200, { album: cleanAlbum(b.album, b.artist), confident: false, candidates: [], cleaned: titles.map((t) => cleanTitle(t, b.artist)), error: e.message }); }
     }
     if (p === '/api/yt/status') {
       return send(res, 200, { jobs: Object.fromEntries([...ytJobs].map(([k, v]) => [k, { state: v.state, error: v.error || null }])) });
