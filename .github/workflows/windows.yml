@@ -1,0 +1,26 @@
+name: Windows app
+on:
+  push:
+    branches: [main]
+    paths: ['windows/**', '.github/workflows/windows.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Build installer
+        working-directory: windows
+        run: |
+          npm install --no-audit --no-fund
+          npm run dist
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows-v${{ github.run_number }}
+          name: Tidefin for Windows ${{ github.run_number }}
+          files: windows/dist/Tidefin-Setup.exe

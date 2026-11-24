@@ -1,0 +1,32 @@
+{
+  "name": "tidefin",
+  "productName": "Tidefin",
+  "version": "1.0.0",
+  "description": "Tidefin for Windows",
+  "author": "LankyFranky89",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --publish never"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "no.techfix.tidefin",
+    "productName": "Tidefin",
+    "files": ["main.js", "setup.html", "build/tray.png", "build/icon.ico"],
+    "directories": { "output": "dist", "buildResources": "build" },
+    "win": { "target": "nsis", "icon": "build/icon.ico" },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Tidefin",
+      "artifactName": "Tidefin-Setup.exe"
+    }
+  }
+}

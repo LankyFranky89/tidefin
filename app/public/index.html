@@ -749,7 +749,8 @@ function updateNowUi(t) {
   $('#np-a').textContent = [t.artist, t.album].filter(Boolean).join(' — ');
   $('#np-th').style.backgroundImage = t.src === 'tidal' ? bg(t.cover) : jfImg(t.imageId, 120);
   if (!NATIVE && 'mediaSession' in navigator) {
-    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.album || '' });
+    const art = t.src === 'tidal' ? t.cover : (t.imageId ? location.origin + `/api/library/image/${t.imageId}?h=512` : '');
+    navigator.mediaSession.metadata = new MediaMetadata({ title: t.title, artist: t.artist, album: t.album || '', artwork: art ? [{ src: art, sizes: '512x512' }] : [] });
   }
   updateNowDl(); markPlaying(); renderFs();
 }
@@ -1045,6 +1046,7 @@ try { if (localStorage.tfVol) { $('#vol').value = localStorage.tfVol; audio.volu
 if ('mediaSession' in navigator) {
   navigator.mediaSession.setActionHandler('nexttrack', () => $('#next').onclick());
   navigator.mediaSession.setActionHandler('previoustrack', () => $('#prev').onclick());
+  try { navigator.mediaSession.setActionHandler('play', () => $('#pp').onclick()); navigator.mediaSession.setActionHandler('pause', () => $('#pp').onclick()); } catch {}
 }
 document.addEventListener('keydown', (e) => { if (e.code === 'Space' && e.target.tagName !== 'INPUT') { e.preventDefault(); $('#pp').onclick(); } });
 
