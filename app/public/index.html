@@ -1156,12 +1156,15 @@ function trackRows(list, { showThumb = true, numbered = false } = {}) {
       ${t.src === 'tidal' ? `<button class="${dlClass(t.id)}" data-dl="${esc(t.id)}" data-i="${i}" title="Download to library">${dlIcon(t.id)}</button>` : `<button class="ib more" data-more="${i}" title="More">${IMORE}</button>`}
     </div>`).join('') + '</div>';
 }
+let rowStartAt = 0;
 function bindRows(el, list) {
   // tap a song (its title/row) to play it; tapping the song that's already playing opens the big player
   el.querySelectorAll('.row').forEach((r) => r.addEventListener('click', (e) => {
     if (e.target.closest('button, [data-play], a')) return;
     const t = list[+r.dataset.i], cur = queue[qi];
-    if (cur && t && cur.src === t.src && String(cur.id) === String(t.id)) { openFs(); return; }
+    // a double-click on PC is two clicks: the 2nd must not open the big player for the song that just started
+    if (cur && t && cur.src === t.src && String(cur.id) === String(t.id)) { if (e.detail < 2 && Date.now() - rowStartAt > 1500) openFs(); return; }
+    rowStartAt = Date.now();
     playList(list, +r.dataset.i);
   }));
   el.querySelectorAll('[data-play]').forEach((b) => b.onclick = () => {
