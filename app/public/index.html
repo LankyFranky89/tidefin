@@ -445,8 +445,12 @@ html.tv #fs .ib.tvf,html.tv #fs .big.tvf{outline-color:#fff}
 .ib.dl.queued{padding:1px}
 .card .ib.dl.queued .ring b{font-size:11px}
 nav button[data-v="downloads"]{position:relative}
-.navring{position:absolute;width:22px;height:22px;top:2px;right:2px;border-radius:50%;background:rgba(10,14,18,.85);pointer-events:none}
-.navring .ring b{font-size:9px}
+.navring{width:26px;height:26px;display:inline-grid;flex:none;margin:-4px -6px -4px 2px;pointer-events:none}
+.navring .ring b{font-size:10px}
+html.phone nav button.dling>svg,html.fold nav button.dling>svg,html.tv nav button.dling>svg{display:none}
+html.phone .navring,html.fold .navring{order:-1;width:24px;height:24px;margin:-1px 0}
+html.tv .navring{order:-1;width:34px;height:34px;margin:0}
+html.tv .navring .ring b{font-size:13px}
 .tmh{font-size:15px;margin:14px 0 8px;color:var(--dim);font-weight:600}
 .modal.fanrev{width:min(640px,94vw);max-height:86vh;display:flex;flex-direction:column}
 .fanrev .frl{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dim);margin-bottom:10px}
@@ -688,8 +692,9 @@ function updateDlBadge(items) {
   for (const i of active) { const p = i.progress && typeof i.progress === 'object' && i.progress.total ? i.progress : null; left += p ? Math.max(0, p.total - p.current) : 1; }
   document.querySelectorAll('nav button[data-v="downloads"]').forEach((b) => {
     let r = b.querySelector('.navring');
+    b.classList.toggle('dling', !!active.length);
     if (!active.length) { if (r) r.remove(); return; }
-    if (!r) { r = document.createElement('span'); r.className = 'navring'; b.prepend(r); }
+    if (!r) { r = document.createElement('span'); r.className = 'navring'; b.appendChild(r); }
     r.innerHTML = ringIcon({ label: left > 99 ? '99+' : String(left) });
   });
 }
