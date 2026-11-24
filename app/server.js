@@ -694,6 +694,98 @@ async function watchTidarr() {
 }
 setTimeout(watchTidarr, 3000);
 
+// ---------- Cast to TV: the Tidefin TV app checks in here and takes commands from your phone/PC ----------
+const castDevices = new Map(); // id -> {name, seen, state, cmds, ip}
+const TV_FILE = path.join(DATA_DIR, 'lg-tv.json');
+let tvInfo = {}; try { tvInfo = JSON.parse(fs.readFileSync(TV_FILE, 'utf8')); } catch {}
+const saveTv = () => { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(TV_FILE, JSON.stringify(tvInfo)); } catch {} };
+const clientIp = (req) => String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+
+// Minimal WebSocket client (LG's control socket uses a self-signed certificate, so no ws library needed)
+function lgSocket(ip) {
+  const net = require('net'), tls = require('tls'), crypto = require('crypto');
+  const tryPort = (secure) => new Promise((resolve, reject) => {
+    const port = secure ? 3001 : 3000;
+    const sock = secure ? tls.connect({ host: ip, port, rejectUnauthorized: false }) : net.connect({ host: ip, port });
+    const key = crypto.randomBytes(16).toString('base64');
+    const timer = setTimeout(() => { sock.destroy(); reject(new Error('TV did not answer')); }, 5000);
+    sock.once('error', (e) => { clearTimeout(timer); reject(e); });
+    sock.once(secure ? 'secureConnect' : 'connect', () => sock.write(`GET / HTTP/1.1\r\nHost: ${ip}:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`));
+    let buf = Buffer.alloc(0), open = false;
+    const listeners = [];
+    sock.on('data', (d) => {
+      buf = Buffer.concat([buf, d]);
+      if (!open) {
+        const i = buf.indexOf('\r\n\r\n'); if (i < 0) return;
+        if (!/^HTTP\/1\.1 101/.test(buf.slice(0, i).toString())) { clearTimeout(timer); sock.destroy(); return reject(new Error('TV refused the connection')); }
+        open = true; buf = buf.slice(i + 4); clearTimeout(timer);
+        resolve({
+          send: (obj) => { // masked text frame
+            const data = Buffer.from(JSON.stringify(obj)); const mask = crypto.randomBytes(4);
+            const len = data.length; const head = len < 126 ? Buffer.from([0x81, 0x80 | len]) : len < 65536 ? Buffer.from([0x81, 0xfe, len >> 8, len & 255]) : null;
+            if (!head) return;
+            const out = Buffer.alloc(len); for (let k = 0; k < len; k++) out[k] = data[k] ^ mask[k & 3];
+            sock.write(Buffer.concat([head, mask, out]));
+          },
+          on: (fn) => listeners.push(fn),
+          close: () => sock.destroy(),
+        });
+      }
+      while (open && buf.length >= 2) { // unmasked frames from the TV
+        let len = buf[1] & 127, off = 2;
+        if (len === 126) { if (buf.length < 4) return; len = buf.readUInt16BE(2); off = 4; }
+        else if (len === 127) { if (buf.length < 10) return; len = Number(buf.readBigUInt64BE(2)); off = 10; }
+        if (buf.length < off + len) return;
+        const op = buf[0] & 15, payload = buf.slice(off, off + len); buf = buf.slice(off + len);
+        if (op === 1) { let m; try { m = JSON.parse(payload.toString()); } catch { continue; } listeners.forEach((fn) => fn(m)); }
+        if (op === 8) sock.destroy();
+      }
+    });
+  });
+  return tryPort(true).catch(() => tryPort(false));
+}
+async function lgCommand(ip, uri, payload) {
+  const ws = await lgSocket(ip);
+  try {
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('No answer from the TV. If a pairing prompt is showing, accept it and try again.')), 60000);
+      const pairing = JSON.parse(fs.readFileSync(path.join(__dirname, 'lg-pairing.json'), 'utf8'));
+      if (tvInfo.clientKey) pairing['client-key'] = tvInfo.clientKey;
+      ws.on((m) => {
+        if (m.id === 'reg' && m.type === 'registered') {
+          if (m.payload && m.payload['client-key'] && m.payload['client-key'] !== tvInfo.clientKey) { tvInfo.clientKey = m.payload['client-key']; saveTv(); }
+          ws.send({ type: 'request', id: 'mac', uri: 'ssap://com.webos.service.connectionmanager/getinfo' });
+          ws.send({ type: 'request', id: 'cmd', uri, payload: payload || {} });
+        } else if (m.id === 'reg' && m.type === 'error') { clearTimeout(timer); reject(new Error('TV said no: ' + (m.error || 'pairing refused'))); }
+        else if (m.id === 'mac' && m.payload) {
+          const mac = m.payload.wiredInfo?.macAddress || m.payload.wifiInfo?.macAddress;
+          if (mac && mac !== tvInfo.mac) { tvInfo.mac = mac; saveTv(); }
+        } else if (m.id === 'cmd') { clearTimeout(timer); m.type === 'error' ? reject(new Error(m.error || 'TV error')) : resolve(m.payload); }
+      });
+      ws.send({ type: 'register', id: 'reg', payload: pairing });
+    });
+  } finally { setTimeout(() => ws.close(), 1500); }
+}
+function wakeOnLan(mac) {
+  const dgram = require('dgram');
+  const hex = String(mac || '').replace(/[^0-9a-f]/gi, ''); if (hex.length !== 12) return false;
+  const m = Buffer.from(hex, 'hex'); const pkt = Buffer.concat([Buffer.alloc(6, 0xff), ...Array(16).fill(m)]);
+  const sock = dgram.createSocket('udp4');
+  sock.bind(() => { sock.setBroadcast(true); for (const t of ['255.255.255.255', tvInfo.ip && tvInfo.ip.replace(/\.\d+$/, '.255')].filter(Boolean)) sock.send(pkt, 9, t); setTimeout(() => sock.close(), 500); });
+  return true;
+}
+const TV_APP_ID = 'no.techfix.tidefin';
+async function wakeTv() {
+  if (!tvInfo.ip) throw new Error('Open Tidefin on the TV once, so Tidefin learns where the TV is.');
+  let reachable = await lgSocket(tvInfo.ip).then((w) => { w.close(); return true; }).catch(() => false);
+  if (!reachable) {
+    if (!wakeOnLan(tvInfo.mac)) throw new Error('The TV is off, and its network address (MAC) isn\'t known yet. Turn it on by hand this time.');
+    for (let i = 0; i < 12 && !reachable; i++) { await new Promise((r) => setTimeout(r, 2500)); reachable = await lgSocket(tvInfo.ip).then((w) => { w.close(); return true; }).catch(() => false); }
+    if (!reachable) throw new Error('The TV didn\'t wake up. On the TV, turn on Settings → General → Devices → "Turn on via Wi-Fi" (or "Mobile TV On").');
+  }
+  await lgCommand(tvInfo.ip, 'ssap://system.launcher/launch', { id: TV_APP_ID });
+}
+
 // ---------- auth (optional) ----------
 function authorized(req) {
   if (!APP_PASSWORD) return true;
@@ -812,6 +904,33 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/yt/clear' && req.method === 'POST') {
       for (const [k, v] of ytJobs) if (v.state !== 'queued') ytJobs.delete(k);
       saveYtJobs(); return send(res, 200, { ok: true });
+    }
+    if (p === '/api/cast/poll' && req.method === 'POST') { // the TV app checks in every second
+      const b = await readBody(req);
+      const id = String(b.id || '').slice(0, 40); if (!id) return fail(res, 400, 'Missing id');
+      const d = castDevices.get(id) || { cmds: [] };
+      Object.assign(d, { name: String(b.name || 'LG TV').slice(0, 40), seen: Date.now(), state: b.state || null, ip: clientIp(req) });
+      castDevices.set(id, d);
+      if (b.tv && d.ip && d.ip !== tvInfo.ip) { tvInfo.ip = d.ip; saveTv(); }
+      const cmds = d.cmds; d.cmds = [];
+      return send(res, 200, { cmds });
+    }
+    if (p === '/api/cast/devices') {
+      const now = Date.now();
+      for (const [k, d] of castDevices) if (now - d.seen > 6 * 3600e3) castDevices.delete(k);
+      const list = [...castDevices].map(([id, d]) => ({ id, name: d.name, online: now - d.seen < 5000, state: d.state }));
+      return send(res, 200, { devices: list, tv: { known: !!tvInfo.ip, canWake: !!tvInfo.ip } });
+    }
+    if (p === '/api/cast/send' && req.method === 'POST') {
+      const b = await readBody(req);
+      const d = castDevices.get(String(b.to || ''));
+      if (!d) return fail(res, 404, 'TV not found');
+      d.cmds.push({ cmd: String(b.cmd || ''), data: b.data || null, at: Date.now() });
+      if (d.cmds.length > 30) d.cmds = d.cmds.slice(-30);
+      return send(res, 200, { ok: true });
+    }
+    if (p === '/api/cast/wake' && req.method === 'POST') {
+      try { await wakeTv(); return send(res, 200, { ok: true }); } catch (e) { return fail(res, 502, e.message); }
     }
     if (p === '/api/yt/status') {
       return send(res, 200, { jobs: Object.fromEntries([...ytJobs].map(([k, v]) => [k, { state: v.state, error: v.error || null, title: v.title || '', artist: v.albumArtist || v.artist || '', album: v.album || '', at: v.at || 0 }])) });

@@ -462,6 +462,8 @@ html.tv .navring .ring b{font-size:13px}
 .fanrev .frrow{display:grid;grid-template-columns:28px 1fr;gap:8px;align-items:start}
 .fanrev .frn{color:var(--dim);font-size:13px;padding-top:9px;text-align:right}
 .fanrev .fryt{font-size:11px;color:var(--dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.castb.on{color:var(--accent)!important}
+html.tv .castb{display:none}
 </style>
 </head>
 <body>
@@ -493,6 +495,7 @@ html.tv .navring .ring b{font-size:13px}
   </div>
   <div class="right">
     <button class="ib dl" id="np-dl" title="Download to library" hidden></button>
+    <button class="ib castb" id="castb" title="Play on TV"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 20h.01"/></svg></button>
     <svg viewBox="0 0 24 24" width="18" fill="currentColor" style="color:var(--dim)"><path d="M3 10v4h4l5 5V5L7 10zm13.5 2A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
     <input type="range" id="vol" min="0" max="100" value="90">
   </div>
@@ -513,6 +516,7 @@ html.tv .navring .ring b{font-size:13px}
         <button class="big" id="fs-pp" title="Play/Pause"></button>
         <button class="ib" id="fs-next" title="Next"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
         <button class="ib sm" id="fs-rep" title="Repeat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></svg></button>
+        <button class="ib sm castb" id="fs-cast" title="Play on TV"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><path d="M2 20h.01"/></svg></button>
         <button class="ib sm" id="fs-lyb" title="Lyrics"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12.5 6.5 21a2.1 2.1 0 0 1-3-3L12 9.5"/><circle cx="17" cy="7" r="4.5"/></svg></button>
       </div>
     </div>
@@ -2110,6 +2114,125 @@ if (NATIVE) {
 }
 window.__tfReady = true; setLayout();
 if (IS_TV) initTv();
+
+// ---------- Play on TV (the Tidefin TV app receives, phone/PC become the remote) ----------
+const castKey = (t) => t ? t.src + ':' + t.id : '';
+let castTo = null, castName = '', castState = null, castTimer = null, castLost = 0;
+async function castCmd(cmd, data) {
+  if (!castTo) return;
+  try { await api('/api/cast/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: castTo, cmd, data }) }); }
+  catch (e) { toast('TV: ' + e.message, true); }
+}
+function castUi(st) {
+  if (!st) return;
+  const ff = $('#fs-from'); if (ff) ff.textContent = 'Playing on ' + castName;
+  const ic = st.playing ? I.pause : I.play;
+  $('#pp').innerHTML = ic; $('#fs-pp').innerHTML = ic; fs.classList.toggle('paused', !st.playing);
+  const c = fmt(st.pos || 0), d = fmt(st.dur);
+  $('#cur').textContent = c; $('#dur').textContent = d; $('#fs-cur').textContent = c; $('#fs-dur').textContent = d;
+  if (!seeking && st.dur) { const v = st.pos / st.dur * 1000; $('#seek').value = v; $('#fs-seek').value = v; $('#mini-prog').style.width = (v / 10) + '%'; }
+  if (st.cur && castKey(queue[qi]) !== castKey(st.cur)) { // the TV moved on by itself
+    const j = queue.findIndex((x) => castKey(x) === castKey(st.cur));
+    if (j >= 0) { qi = j; updateNowUi(queue[qi]); } else { queue = [st.cur]; qi = 0; updateNowUi(st.cur); }
+  }
+}
+async function castPoll() {
+  clearTimeout(castTimer);
+  if (!castTo) return;
+  try {
+    const { devices } = await api('/api/cast/devices');
+    const d = devices.find((x) => x.id === castTo);
+    if (d && d.online) { castLost = 0; castState = d.state; castUi(castState); }
+    else if (++castLost > 10) { toast(`Lost connection to ${castName}`, true); stopCast(false); return; }
+  } catch {}
+  castTimer = setTimeout(castPoll, 1000);
+}
+function castMark() {
+  document.body.classList.toggle('casting', !!castTo);
+  document.querySelectorAll('.castb').forEach((b) => { b.classList.toggle('on', !!castTo); b.title = castTo ? 'Playing on ' + castName : 'Play on TV'; });
+  const f = $('#fs-from'); if (f && castTo) f.textContent = 'Playing on ' + castName;
+}
+async function startCast(dev) {
+  const pos = audio.currentTime || 0, wasPlaying = !audio.paused;
+  castTo = dev.id; castName = dev.name || 'TV'; castLost = 0;
+  try { audio.pause(); } catch {}
+  if (queue[qi]) await castCmd('load', { queue, index: qi, pos, repeat, play: wasPlaying || true });
+  castMark(); toast('Playing on ' + castName); castPoll();
+}
+function stopCast(resumeHere) {
+  const st = castState, to = castTo;
+  if (to && resumeHere) api('/api/cast/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to, cmd: 'pause' }) }).catch(() => {});
+  castTo = null; castState = null; clearTimeout(castTimer); castMark();
+  if (resumeHere && st && st.cur) {
+    const j = queue.findIndex((x) => castKey(x) === castKey(st.cur)); if (j >= 0) qi = j;
+    if (queue[qi]) { loadCurrent(); const p = st.pos || 0; if (p > 1) audio.addEventListener('loadedmetadata', () => { try { audio.currentTime = p; } catch {} }, { once: true }); if (!st.playing) setTimeout(() => audio.pause(), 300); }
+  }
+}
+async function openCastMenu(anchor) {
+  let r; try { r = await api('/api/cast/devices'); } catch (e) { return toast(e.message, true); }
+  const tvs = r.devices;
+  const items = [{ label: (castTo ? '' : '✓ ') + 'This device', run: () => { if (castTo) stopCast(true); } }];
+  for (const d of tvs) items.push({ label: (castTo === d.id ? '✓ ' : '') + d.name + (d.online ? (d.state && d.state.cur ? ' · playing' : ' · ready') : ' · off, tap to wake'), run: () => d.online ? (castTo === d.id ? null : startCast(d)) : wakeAndCast(d) });
+  if (!tvs.length) items.push({ label: 'No TV yet: open Tidefin on your LG TV once', run: () => {} });
+  openMenu(anchor, items);
+}
+async function wakeAndCast(d) {
+  toast(`Waking ${d.name} and opening Tidefin…`);
+  try { await api('/api/cast/wake', { method: 'POST' }); } catch (e) { return toast(e.message, true); }
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    try { const { devices } = await api('/api/cast/devices'); const x = devices.find((y) => y.online); if (x) return startCast(x); } catch {}
+  }
+  toast('The TV app didn\'t check in. Open Tidefin on the TV and try again.', true);
+}
+if (!IS_TV) {
+  document.querySelectorAll('.castb').forEach((b) => b.onclick = (e) => { e.stopPropagation(); openCastMenu(b); });
+  // while casting, the player controls steer the TV
+  const wrap = (sel, fn) => { const el = $(sel), orig = el.onclick; el.onclick = function (e) { if (castTo) return fn(e); return orig && orig.call(this, e); }; };
+  wrap('#pp', () => castCmd('toggle'));
+  wrap('#next', () => castCmd('next'));
+  wrap('#prev', () => castCmd('prev'));
+  wrap('#fs-next', () => castCmd('next'));
+  const sk = $('#seek').onchange;
+  const castSeek = function (e) { if (!castTo) return sk.call(this, e); seeking = false; if (castState && castState.dur) castCmd('seek', { pos: e.target.value / 1000 * castState.dur }); };
+  $('#seek').onchange = castSeek; $('#fs-seek').onchange = castSeek;
+  const _lc = loadCurrent;
+  loadCurrent = function () {
+    if (!castTo) return _lc.apply(this, arguments);
+    const t = queue[qi]; if (!t) return;
+    castCmd('load', { queue, index: qi, pos: 0, repeat, play: true }); updateNowUi(t);
+  };
+}
+// The TV app: check in every second, report what's playing, take commands
+if (IS_TV) {
+  const myId = (() => { try { return localStorage.tfCastId || (localStorage.tfCastId = 'tv-' + Math.random().toString(36).slice(2, 10)); } catch { return 'tv-1'; } })();
+  const lean = (t) => t && ({ src: t.src, id: t.id, title: t.title, artist: t.artist, album: t.album, albumId: t.albumId, cover: t.cover, imageId: t.imageId, isrc: t.isrc, duration: t.duration });
+  const apply = (c) => {
+    const d = c.data || {};
+    if (c.cmd === 'load' && Array.isArray(d.queue) && d.queue.length) {
+      shuffle = false; queue = d.queue; origQueue = queue.slice(); qi = Math.min(Math.max(0, d.index | 0), queue.length - 1);
+      if (['off', 'all', 'one'].includes(d.repeat)) repeat = d.repeat;
+      loadCurrent();
+      if (d.pos > 1) audio.addEventListener('loadedmetadata', () => { try { audio.currentTime = d.pos; } catch {} }, { once: true });
+    } else if (c.cmd === 'toggle') $('#pp').onclick();
+    else if (c.cmd === 'play') { if (audio.paused) $('#pp').onclick(); }
+    else if (c.cmd === 'pause') { if (!audio.paused) $('#pp').onclick(); }
+    else if (c.cmd === 'next') $('#next').onclick();
+    else if (c.cmd === 'prev') $('#prev').onclick();
+    else if (c.cmd === 'seek' && isFinite(d.pos)) { try { audio.currentTime = d.pos; } catch {} }
+  };
+  const tick = async () => {
+    try {
+      const t = queue[qi];
+      const dur = previewMode ? Math.min(PREVIEW_SECS, audio.duration || PREVIEW_SECS) : audio.duration;
+      const state = t ? { cur: lean(t), playing: !audio.paused, pos: audio.currentTime || 0, dur: isFinite(dur) ? dur : null, qi, len: queue.length } : null;
+      const r = await api('/api/cast/poll', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: myId, name: 'LG TV', tv: true, state }) });
+      for (const c of r.cmds || []) apply(c);
+    } catch {}
+    setTimeout(tick, 1000);
+  };
+  tick();
+}
 loadSettings().then(() => { libTab = S.libraryTab || 'artists'; if (S.youtube) pollYt(); go(S.startPage || 'home', {}, false); });
 applySettings();
 pollQueue();
