@@ -333,6 +333,54 @@ async function tidalAlbum(id) {
 
 // ---------- YouTube Music (search) + MeTube (downloads) ----------
 const YT_SONGS = 'EgWKAQIIAWoMEA4QChADEAQQCRAF'; // "Songs" filter (same as ytmusicapi)
+const YT_ALBUMS = 'EgWKAQIYAWoMEA4QChADEAQQCRAF'; // "Albums" filter
+async function ytApi(endpoint, body) {
+  const r = await fetch(`https://music.youtube.com/youtubei/v1/${endpoint}?prettyPrint=false`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0', Origin: 'https://music.youtube.com' },
+    body: JSON.stringify({ ...body, context: { client: { clientName: 'WEB_REMIX', clientVersion: '1.20241106.01.00', hl: 'en', gl: 'NO' } } }),
+  });
+  if (!r.ok) throw new Error(`YouTube Music ${r.status}`);
+  return r.json();
+}
+const ytText = (runs) => (runs || []).map((x) => x.text).join('');
+const ytPage = (x) => x?.navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType;
+const ytThumb = (t) => { const a = t?.musicThumbnailRenderer?.thumbnail?.thumbnails || t?.croppedSquareThumbnailRenderer?.thumbnail?.thumbnails || []; const u = (a[a.length - 1] || {}).url || null; return u ? u.replace(/=w\d+-h\d+/, '=w544-h544') : null; };
+function ytFind(o, key, out = []) { if (!o || typeof o !== 'object') return out; if (o[key]) out.push(o[key]); for (const k in o) if (k !== key) ytFind(o[k], key, out); return out; }
+async function ytSearchAlbums(q) {
+  const j = await ytApi('search', { query: q, params: YT_ALBUMS });
+  return ytFind(j.contents, 'musicResponsiveListItemRenderer').map((it) => {
+    const cols = (it.flexColumns || []).map((c) => c.musicResponsiveListItemFlexColumnRenderer?.text?.runs || []);
+    const browseId = it.navigationEndpoint?.browseEndpoint?.browseId;
+    if (!browseId || !cols[0][0]) return null;
+    const meta = cols[1] || [];
+    const parts = ytText(meta).split(' • ');
+    const artist = meta.filter((x) => ytPage(x) === 'MUSIC_PAGE_TYPE_ARTIST').map((x) => x.text).join(', ') || parts[1] || '';
+    return { id: browseId, title: cols[0][0].text, artist, kind: parts[0] || 'Album', year: (parts.find((x) => /^\d{4}$/.test(x.trim())) || '').trim() || null, cover: ytThumb(it.thumbnail) };
+  }).filter(Boolean).slice(0, 16);
+}
+async function ytAlbum(browseId) {
+  const j = await ytApi('browse', { browseId });
+  const hdr = ytFind(j, 'musicResponsiveHeaderRenderer')[0] || ytFind(j, 'musicDetailHeaderRenderer')[0] || {};
+  const title = ytText(hdr.title?.runs);
+  const strap = hdr.straplineTextOne?.runs || hdr.subtitle?.runs || [];
+  const artist = strap.filter((x) => ytPage(x) === 'MUSIC_PAGE_TYPE_ARTIST').map((x) => x.text).join(', ') || ytText(strap).split(' • ').find((x) => x && !/^(album|single|ep|\d{4})$/i.test(x.trim())) || '';
+  const sub = ytText(hdr.subtitle?.runs);
+  const year = (sub.match(/\b(19|20)\d{2}\b/) || [])[0] || null;
+  const cover = ytThumb(hdr.thumbnail?.musicThumbnailRenderer ? hdr.thumbnail : hdr.thumbnail?.croppedSquareThumbnailRenderer ? hdr.thumbnail : null) || ytThumb(ytFind(j, 'musicThumbnailRenderer')[0] ? { musicThumbnailRenderer: ytFind(j, 'musicThumbnailRenderer')[0] } : null);
+  const playlistId = ytFind(j, 'audioPlaylistId')[0] || ytFind(j, 'playlistId')[0] || null;
+  const tracks = ytFind(j, 'musicResponsiveListItemRenderer').map((it, i) => {
+    const cols = (it.flexColumns || []).map((c) => c.musicResponsiveListItemFlexColumnRenderer?.text?.runs || []);
+    const videoId = it.playlistItemData?.videoId;
+    if (!videoId || !cols[0] || !cols[0][0]) return null;
+    const dur = ytText(it.fixedColumns?.[0]?.musicResponsiveListItemFixedColumnRenderer?.text?.runs);
+    const tArtist = (cols[1] || []).filter((x) => ytPage(x) === 'MUSIC_PAGE_TYPE_ARTIST').map((x) => x.text).join(', ');
+    return { id: videoId, title: cols[0][0].text, artist: tArtist || artist, album: title, number: +ytText(it.index?.runs) || i + 1,
+      duration: dur ? dur.split(':').reduce((a, b) => a * 60 + +b, 0) : null, cover };
+  }).filter(Boolean);
+  return { id: browseId, title, artist, year, cover, playlistId, tracks };
+}
+
 async function ytSearch(q) {
   const r = await fetch('https://music.youtube.com/youtubei/v1/search?prettyPrint=false', {
     method: 'POST',
@@ -400,7 +448,7 @@ async function ytSweep() {
       const ext = path.extname(it.filename) || '.m4a';
       const dir = path.join(MUSIC_DIR, safeName(job.artist.split(',')[0]), safeName(job.album || 'YouTube Music'));
       fs.mkdirSync(dir, { recursive: true });
-      const dest = path.join(dir, safeName(job.title) + ext);
+      const dest = path.join(dir, (job.number ? String(job.number).padStart(2, '0') + ' ' : '') + safeName(job.title) + ext);
       try { fs.renameSync(src, dest); } catch { fs.copyFileSync(src, dest); fs.unlinkSync(src); } // different disks/shares
       job.state = 'done'; job.path = dest; moved++;
     } catch (e) { job.state = 'error'; job.error = 'Could not move file: ' + e.message; }
@@ -514,15 +562,27 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/yt/search') {
       if (!settings.youtube) return send(res, 200, { off: true, tracks: [] });
       const term = (q.get('q') || '').trim();
-      return send(res, 200, { tracks: term ? await ytSearch(term) : [] });
+      if (!term) return send(res, 200, { tracks: [], albums: [] });
+      const [tracks, albums] = await Promise.all([ytSearch(term), ytSearchAlbums(term).catch(() => [])]);
+      return send(res, 200, { tracks, albums });
+    }
+    if ((m = /^\/api\/yt\/album\/([\w-]+)$/.exec(p))) {
+      if (!settings.youtube) return fail(res, 400, 'YouTube Music is turned off in Settings');
+      return send(res, 200, await ytAlbum(m[1]));
     }
     if (p === '/api/yt/download' && req.method === 'POST') {
       if (!settings.youtube) return fail(res, 400, 'YouTube Music is turned off in Settings');
       const b = await readBody(req);
-      const id = String(b.id || '').replace(/[^\w-]/g, '');
-      if (!id) return fail(res, 400, 'Missing video id');
-      await ytDownload({ id, title: b.title || id, artist: b.artist || 'Unknown artist', album: b.album || '' });
-      return send(res, 200, { ok: true });
+      const items = Array.isArray(b.items) ? b.items : [b];
+      let n = 0;
+      for (const it of items.slice(0, 200)) {
+        const id = String(it.id || '').replace(/[^\w-]/g, '');
+        if (!id) continue;
+        await ytDownload({ id, title: it.title || id, artist: it.artist || 'Unknown artist', album: it.album || '', number: it.number || null });
+        n++;
+      }
+      if (!n) return fail(res, 400, 'Missing video id');
+      return send(res, 200, { ok: true, queued: n });
     }
     if (p === '/api/yt/status') {
       return send(res, 200, { jobs: Object.fromEntries([...ytJobs].map(([k, v]) => [k, { state: v.state, error: v.error || null }])) });
