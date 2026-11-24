@@ -809,8 +809,12 @@ const server = http.createServer(async (req, res) => {
       try { return send(res, 200, await mbMatch(String(b.artist || ''), String(b.album), titles)); }
       catch (e) { return send(res, 200, { album: cleanAlbum(b.album, b.artist), confident: false, candidates: [], cleaned: titles.map((t) => cleanTitle(t, b.artist)), error: e.message }); }
     }
+    if (p === '/api/yt/clear' && req.method === 'POST') {
+      for (const [k, v] of ytJobs) if (v.state !== 'queued') ytJobs.delete(k);
+      saveYtJobs(); return send(res, 200, { ok: true });
+    }
     if (p === '/api/yt/status') {
-      return send(res, 200, { jobs: Object.fromEntries([...ytJobs].map(([k, v]) => [k, { state: v.state, error: v.error || null }])) });
+      return send(res, 200, { jobs: Object.fromEntries([...ytJobs].map(([k, v]) => [k, { state: v.state, error: v.error || null, title: v.title || '', artist: v.albumArtist || v.artist || '', album: v.album || '', at: v.at || 0 }])) });
     }
     if (p === '/api/settings') {
       if (req.method === 'POST') return send(res, 200, saveSettings(await readBody(req)));

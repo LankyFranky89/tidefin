@@ -441,8 +441,8 @@ html.tv #fs .ib.tvf,html.tv #fs .big.tvf{outline-color:#fff}
 .ring .rt{fill:none;stroke:rgba(255,255,255,.14);stroke-width:3}
 .ring .rf{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round;transition:stroke-dasharray .4s}
 .ring .rspin{animation:rspin 1.2s linear infinite;transform-origin:18px 18px}
-.ring b{position:relative;font-size:9.5px;font-weight:700;color:var(--text);letter-spacing:-.3px;line-height:1}
-.ib.dl.queued{padding:1px}
+.ring b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text);letter-spacing:-.3px;line-height:1;font-variant-numeric:tabular-nums;padding:0;margin:0}
+.ib.dl.queued{padding:0}
 .card .ib.dl.queued .ring b{font-size:11px}
 nav button[data-v="downloads"]{position:relative}
 .navring{width:26px;height:26px;display:inline-grid;flex:none;margin:-4px -6px -4px 2px;pointer-events:none}
@@ -713,12 +713,13 @@ async function download(type, id, title, artist, skipConfirm) {
 // ring + songs-left number on the Downloads tab while anything downloads
 function updateDlBadge(items) {
   const active = items.filter((i) => STATUS_MAP[i.status] === 'queued');
-  let left = 0;
+  const ytLeft = Object.values(ytJobsCache).filter((j) => j.state === 'queued').length;
+  let left = ytLeft;
   for (const i of active) { const p = i.progress && typeof i.progress === 'object' && i.progress.total ? i.progress : null; left += p ? Math.max(0, p.total - p.current) : 1; }
   document.querySelectorAll('nav button[data-v="downloads"]').forEach((b) => {
     let r = b.querySelector('.navring');
-    b.classList.toggle('dling', !!active.length);
-    if (!active.length) { if (r) r.remove(); return; }
+    b.classList.toggle('dling', !!(active.length || ytLeft));
+    if (!active.length && !ytLeft) { if (r) r.remove(); return; }
     if (!r) { r = document.createElement('span'); r.className = 'navring'; b.appendChild(r); }
     r.innerHTML = ringIcon({ label: left > 99 ? '99+' : String(left) });
   });
@@ -2021,19 +2022,21 @@ async function renderYtAlbum() {
 }
 const ytBtnClass = (id) => 'ib dl ' + ({ queued: 'queued', done: 'done', error: 'err' }[ytState.get(id)] || '');
 const ytBtnIcon = (id) => ({ queued: I.wait, done: I.ok, error: I.err }[ytState.get(id)] || I.dl);
-let ytTimer = null;
+let ytTimer = null, ytJobsCache = {};
 async function pollYt() {
   clearTimeout(ytTimer);
   if (!S.youtube) return;
   try {
     const { jobs } = await api('/api/yt/status');
+    ytJobsCache = jobs;
     let busy = false, done = false;
     for (const [id, j] of Object.entries(jobs)) {
       if (ytState.get(id) === 'queued' && j.state === 'done') done = true;
       if (j.state === 'error' && ytState.get(id) === 'queued') toast('YouTube download failed: ' + (j.error || 'unknown error'), true);
       ytState.set(id, j.state === 'error' ? 'error' : j.state); if (j.state === 'queued') busy = true;
     }
-    refreshYtButtons();
+    refreshYtButtons(); updateDlBadge(queueCache);
+    if (view.name === 'downloads') renderDownloads();
     if (done) setTimeout(() => loadLibIndex(true), 8000);
     if (busy) ytTimer = setTimeout(pollYt, 5000);
   } catch { ytTimer = setTimeout(pollYt, 15000); }
@@ -2057,16 +2060,31 @@ function ytPlayer(t, list) {
 function renderDownloads() {
   const label = { queue_download: 'Queued', download: 'Downloading', queue_processing: 'Waiting', processing: 'Processing', finished: 'Done', error: 'Failed' };
   const items = queueCache;
-  main.innerHTML = `<h2>Tidarr queue <span class="tag">${items.length}</span>
+  main.innerHTML = `<h2>Tidal <span class="tag">${items.length}</span>
     <span style="margin-left:auto;display:flex;gap:6px"><button class="btn sec" id="rf">Retry failed</button><button class="btn sec" id="cf">Clear finished</button></span></h2>
     ${items.length ? items.map((i) => `<div class="qrow"><div style="min-width:0"><div class="rt" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(i.title || (i.type + ' ' + i.id))}</div><div class="ra" style="color:var(--dim);font-size:13px">${esc(i.artist)} ${i.type ? '· ' + esc(i.type) : ''}</div></div>
       <span class="st ${esc(i.status)}">${label[i.status] || esc(i.status)}${i.progress && i.progress.total > 1 && i.status !== 'finished' ? ` · ${i.progress.current}/${i.progress.total}` : ''}</span>
       <div class="bar"><i style="width:${i.status === 'finished' ? 100 : (i.progress && i.progress.total ? Math.round(100 * i.progress.current / i.progress.total) : typeof i.progress === 'number' ? Math.min(100, i.progress) : (i.status === 'download' || i.status === 'processing') ? 50 : 0)}%"></i></div></div>`).join('') : '<div class="empty">The queue is empty. Search Tidal and press ↓ on a song or album.</div>'}`;
   $('#rf').onclick = async () => { try { await api('/api/queue/retry', { method: 'POST' }); pollQueue(); } catch (e) { toast(e.message, true); } };
   $('#cf').onclick = async () => { try { await api('/api/queue/clear-finished', { method: 'POST' }); pollQueue(); } catch (e) { toast(e.message, true); } };
+  renderYtDownloads();
+}
+function renderYtDownloads() {
+  if (!S.youtube) return;
+  const jobs = Object.entries(ytJobsCache).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, 100);
+  const label = { queued: 'Downloading', done: 'Done', error: 'Failed' };
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `<h2 style="margin-top:28px">YouTube Music <span class="tag">${jobs.length}</span>
+    ${jobs.some(([, j]) => j.state !== 'queued') ? '<span style="margin-left:auto"><button class="btn sec" id="ycf">Clear finished</button></span>' : ''}</h2>` +
+    (jobs.length ? jobs.map(([, j]) => `<div class="qrow"><div style="min-width:0"><div class="rt" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.title)}</div><div class="ra" style="color:var(--dim);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.artist)}${j.album ? ' · ' + esc(j.album) : ''}</div></div>
+      <span class="st ${j.state === 'done' ? 'finished' : j.state === 'error' ? 'error' : 'download'}" ${j.error ? `title="${esc(j.error)}"` : ''}>${label[j.state] || esc(j.state)}</span>
+      <div class="bar"><i style="width:${j.state === 'done' ? 100 : j.state === 'error' ? 0 : 50}%"></i></div></div>`).join('')
+    : '<div class="empty">No YouTube Music downloads yet.</div>');
+  main.appendChild(wrap);
+  const c = $('#ycf'); if (c) c.onclick = async () => { try { await api('/api/yt/clear', { method: 'POST' }); pollYt(); } catch (e) { toast(e.message, true); } };
 }
 
-document.querySelectorAll('nav button').forEach((b) => b.onclick = () => { history_ = []; go(b.dataset.v, {}, false); if (b.dataset.v === 'downloads') pollQueue(); });
+document.querySelectorAll('nav button').forEach((b) => b.onclick = () => { history_ = []; go(b.dataset.v, {}, false); if (b.dataset.v === 'downloads') { pollQueue(); pollYt(); } });
 let qT;
 $('#q').addEventListener('input', () => { clearTimeout(qT); qT = setTimeout(() => { history_ = []; go('search', {}, false); }, 400); });
 $('#q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(qT); history_ = []; go('search', {}, false); } });
