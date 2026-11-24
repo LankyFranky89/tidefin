@@ -639,19 +639,26 @@ async function download(type, id, title, artist, skipConfirm) {
     pollQueue(true);
   } catch (e) { dlState.set(id, 'err'); refreshDlButtons(); toast('Download failed: ' + e.message, true); }
 }
-let queueCache = [], pollTimer = null;
+let queueCache = [], pollTimer = null, seenLibVersion = null, lastDoneAt = 0;
+// Jellyfin picked up new files: refresh what's marked as owned, and the library page you're on
+async function libChanged() {
+  await loadLibIndex(true);
+  if (view.name === 'library' && !document.querySelector('.modal-bg')) renderLibrary();
+  else if (view.name === 'home' && !document.querySelector('.modal-bg')) renderHome();
+}
 async function pollQueue(force) {
   clearTimeout(pollTimer);
   try {
-    const { items } = await api('/api/queue');
+    const { items, libVersion } = await api('/api/queue');
     queueCache = items;
+    if (libVersion !== undefined && seenLibVersion !== null && libVersion !== seenLibVersion) libChanged();
+    if (libVersion !== undefined) seenLibVersion = libVersion;
     let newlyDone = false;
-    for (const it of items) { const s = STATUS_MAP[it.status]; if (s) { if (s === 'done' && dlState.get(String(it.id)) === 'queued') newlyDone = true; dlState.set(String(it.id), s); } }
-    if (newlyDone) setTimeout(() => loadLibIndex(true), 8000); // give Jellyfin a moment to scan
+    for (const it of items) { const s = STATUS_MAP[it.status]; if (s) { if (s === 'done' && dlState.get(String(it.id)) === 'queued') { newlyDone = true; lastDoneAt = Date.now(); } dlState.set(String(it.id), s); } }
     refreshDlButtons();
     if (view.name === 'downloads') renderDownloads();
     const busy = items.some((i) => STATUS_MAP[i.status] === 'queued');
-    pollTimer = setTimeout(pollQueue, busy ? 3000 : 15000);
+    pollTimer = setTimeout(pollQueue, busy || Date.now() - lastDoneAt < 60000 ? 3000 : 15000);
   } catch { pollTimer = setTimeout(pollQueue, 15000); }
 }
 

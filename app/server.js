@@ -491,7 +491,7 @@ async function ytSweep() {
     } catch (e) { job.state = 'error'; job.error = 'Could not move file: ' + e.message; }
   }
   saveYtJobs();
-  if (moved) { libIndexCache = null; jf('/Library/Refresh', { method: 'POST' }).catch(() => {}); }
+  if (moved) jfScanSoon();
 }
 setInterval(() => { if (settings.youtube) ytSweep().catch((e) => console.error('youtube sweep:', e.message)); }, 15000);
 
@@ -514,6 +514,32 @@ async function tidarrQueue() {
     progress: i.progress ?? null, error: i.error || null,
   }));
 }
+
+// Watch Tidarr: as soon as a download finishes, ask Jellyfin to scan, so it shows up in seconds.
+const tdSeen = new Map(); let tdBusyUntil = 0, scanTimer = null, libVersion = 0;
+function jfScanSoon() {
+  clearTimeout(scanTimer);
+  scanTimer = setTimeout(async () => {
+    try { await jf('/Library/Refresh', { method: 'POST' }); } catch (e) { return console.error('scan:', e.message); }
+    // Jellyfin scans in the background; drop our cache a few times while it works
+    for (const ms of [4000, 10000, 20000, 40000]) setTimeout(() => { libIndexCache = null; libVersion++; }, ms);
+  }, 2500); // small wait so several songs finishing together share one scan
+}
+async function watchTidarr() {
+  try {
+    const items = await tidarrQueue();
+    let busy = false;
+    for (const it of items) {
+      const prev = tdSeen.get(it.id);
+      if (it.status === 'finished' && prev && prev !== 'finished') jfScanSoon();
+      if (it.status !== 'finished' && it.status !== 'error') busy = true;
+      tdSeen.set(it.id, it.status);
+    }
+    if (busy) tdBusyUntil = Date.now() + 60000;
+  } catch {}
+  setTimeout(watchTidarr, Date.now() < tdBusyUntil ? 3000 : 20000);
+}
+setTimeout(watchTidarr, 3000);
 
 // ---------- auth (optional) ----------
 function authorized(req) {
@@ -842,10 +868,11 @@ const server = http.createServer(async (req, res) => {
         body: JSON.stringify({ item: { id, url: `https://listen.tidal.com/${type}/${id}`, type, status: 'queue_download', title: b.title || '', artist: b.artist || '' } }),
       });
       if (!r.ok && r.status !== 201) return fail(res, 502, `Tidarr refused (${r.status}): ${(await r.text()).slice(0, 200)}`);
+      tdBusyUntil = Date.now() + 60000;
       if (type === 'track') { addSingle(b.artist, b.title); libIndexCache = null; }
       return send(res, 200, { ok: true });
     }
-    if (p === '/api/queue') return send(res, 200, { items: await tidarrQueue() });
+    if (p === '/api/queue') return send(res, 200, { items: await tidarrQueue(), libVersion });
     if (p === '/api/queue/retry' && req.method === 'POST') {
       const r = await tidarr('/api/retry-failed', { method: 'POST' });
       return send(res, r.ok ? 200 : 502, { ok: r.ok });
