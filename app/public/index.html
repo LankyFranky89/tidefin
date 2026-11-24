@@ -447,6 +447,7 @@ html.tv #fs .ib.tvf,html.tv #fs .big.tvf{outline-color:#fff}
 nav button[data-v="downloads"]{position:relative}
 .navring{position:absolute;width:22px;height:22px;top:2px;right:2px;border-radius:50%;background:rgba(10,14,18,.85);pointer-events:none}
 .navring .ring b{font-size:9px}
+.tmh{font-size:15px;margin:14px 0 8px;color:var(--dim);font-weight:600}
 </style>
 </head>
 <body>
@@ -1466,9 +1467,9 @@ async function renderArtist() {
       else if (dbtn) dbtn.title = 'Artist not found on Tidal';
       if (!t.artist) { box.innerHTML = '<h2>More on Tidal</h2><div class="empty">Couldn\'t find this artist on Tidal.</div>'; return; }
       if (!missing.length) { box.innerHTML = '<h2>More on Tidal</h2><div class="empty">You have everything Tidal has by this artist.</div>'; return; }
-      const label = { ALBUM: 'Album', EP: 'EP', SINGLE: 'Single' };
-      box.innerHTML = `<h2>More on Tidal <span class="tag">${missing.length} not in your library</span></h2><div class="more-tidal">${albumCards(missing.map((x) => ({ ...x, year: [label[x.type] || '', x.year].filter(Boolean).join(' · ') })), 'tidal')}</div>`;
-      bindCards(box, missing, 'tidal');
+      const tm = tidalMoreHtml(missing);
+      box.innerHTML = `<h2>More on Tidal <span class="tag">${missing.length} not in your library</span></h2>` + tm.html;
+      bindTidalMore(box, tm);
     }).catch((e) => { const box = $('#atidal'); if (box) box.innerHTML = '<h2>More on Tidal</h2>' + errBox(e); });
   } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }
 }
@@ -1697,6 +1698,19 @@ async function renderAlbums() {
   } catch (e) { main.innerHTML = libHeader() + errBox(e); bindLibHeader(); }
 }
 
+// "More on Tidal": albums first, then EPs and singles, as separate rows
+function tidalMoreHtml(missing) {
+  const label = { ALBUM: 'Album', EP: 'EP', SINGLE: 'Single' };
+  const yr = (x) => ({ ...x, year: [label[x.type] || '', x.year].filter(Boolean).join(' · ') });
+  const albums = missing.filter((x) => x.type !== 'EP' && x.type !== 'SINGLE'), small = missing.filter((x) => x.type === 'EP' || x.type === 'SINGLE');
+  const part = (title, list, k) => list.length ? `<h3 class="tmh">${title} <span class="tag">${list.length}</span></h3><div class="more-tidal" data-tm="${k}">${albumCards(list.map(yr), 'tidal')}</div>` : '';
+  return { html: part('Albums', albums, 'a') + part('EPs &amp; singles', small, 's'), albums, small };
+}
+function bindTidalMore(box, r) {
+  const a = box.querySelector('[data-tm="a"]'), sg = box.querySelector('[data-tm="s"]');
+  if (a) bindCards(a, r.albums, 'tidal');
+  if (sg) bindCards(sg, r.small, 'tidal');
+}
 // Album page: other albums by the same artist (yours, then the ones on Tidal you don't have)
 async function moreByArtist(a) {
   const vid = view.id, still = () => view.name === 'album' && view.id === vid;
@@ -1716,10 +1730,9 @@ async function moreByArtist(a) {
     const have = new Set([a, ...mine].map((x) => normTitle(x.title)));
     const missing = t.albums.filter((x) => !have.has(normTitle(x.title)) && !albumInLib({ ...x, artist: x.artist || a.artist }));
     if (!missing.length) return;
-    const label = { ALBUM: 'Album', EP: 'EP', SINGLE: 'Single' };
-    const box = $('#amtidal');
-    box.innerHTML = `<h2>More on Tidal <span class="tag">${missing.length} not in your library</span></h2><div class="more-tidal">${albumCards(missing.map((x) => ({ ...x, year: [label[x.type] || '', x.year].filter(Boolean).join(' · ') })), 'tidal')}</div>`;
-    bindCards(box, missing, 'tidal');
+    const box = $('#amtidal'), tm = tidalMoreHtml(missing);
+    box.innerHTML = `<h2>More on Tidal <span class="tag">${missing.length} not in your library</span></h2>` + tm.html;
+    bindTidalMore(box, tm);
   } catch {}
 }
 async function renderAlbum() {
