@@ -442,7 +442,9 @@ html.tv #fs .ib.tvf,html.tv #fs .big.tvf{outline-color:#fff}
 .ring .rf{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round;transition:stroke-dasharray .4s}
 .ring .rspin{animation:rspin 1.2s linear infinite;transform-origin:18px 18px}
 .ring b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:700;color:var(--text);letter-spacing:-.3px;line-height:1;font-variant-numeric:tabular-nums;padding:0;margin:0}
-.ib.dl.queued{padding:0}
+.ib.dl.queued{padding:0;position:relative}
+.ib.dl.queued>.ring{position:absolute;inset:2px;width:auto;height:auto}
+.navring{position:relative}.navring>.ring{position:absolute;inset:0;width:auto;height:auto}
 .card .ib.dl.queued .ring b{font-size:11px}
 nav button[data-v="downloads"]{position:relative}
 .navring{width:26px;height:26px;display:inline-grid;flex:none;margin:-4px -6px -4px 2px;pointer-events:none}
