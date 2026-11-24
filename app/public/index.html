@@ -1724,6 +1724,29 @@ function renderSettings() {
 }
 let renderSettingsShelfOrder = null;
 
+// Library → Albums: what your artists have on Tidal that you don't (albums and singles/EPs apart, grouped by artist)
+let missingTimer = null;
+async function renderMissing() {
+  clearTimeout(missingTimer);
+  const box = $('#missing'); if (!box) return;
+  let r; try { r = await api('/api/library/missing'); } catch (e) { box.innerHTML = '<h2>Not in your library</h2>' + errBox(e); return; }
+  if (!$('#missing')) return;
+  const groups = r.artists.map((g) => {
+    const miss = g.albums.filter((x) => !albumInLib({ ...x, artist: x.artist || g.name }));
+    return { name: g.name, albums: studioAlbums(miss.filter((x) => x.type !== 'SINGLE' && x.type !== 'EP')), small: miss.filter((x) => x.type === 'SINGLE' || x.type === 'EP') };
+  });
+  const label = { EP: 'EP', SINGLE: 'Single' };
+  const sect = (title, key) => {
+    const gs = groups.filter((g) => g[key].length); if (!gs.length) return '';
+    const n = gs.reduce((a, g) => a + g[key].length, 0);
+    return `<h2 style="margin-top:30px">${title} <span class="tag">${n}</span></h2>` + gs.map((g, gi) => `<h3 class="tmh" style="color:var(--text)">${esc(g.name)} <span class="tag">${g[key].length}</span></h3>
+      <div class="more-tidal" data-mg="${key}:${groups.indexOf(g)}">${albumCards(g[key].map((x) => ({ ...x, year: [label[x.type] || '', x.year].filter(Boolean).join(' · ') })), 'tidal')}</div>`).join('');
+  };
+  box.innerHTML = `<div class="sh" style="margin-top:34px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)">Not in your library${r.running ? ` · checking Tidal ${r.done}/${r.total}…` : ''}</div>` +
+    (sect('Albums', 'albums') + sect('Singles &amp; EPs', 'small') || (r.running ? '<div class="empty">Looking through your artists on Tidal…</div>' : '<div class="empty">You have everything your artists have on Tidal.</div>'));
+  box.querySelectorAll('[data-mg]').forEach((el) => { const [k, i] = el.dataset.mg.split(':'); bindCards(el, groups[+i][k], 'tidal'); });
+  if (r.running) missingTimer = setTimeout(() => { if (view.name === 'library' && libTab === 'albums') renderMissing(); }, 4000);
+}
 async function renderAlbums() {
   loading();
   try {
@@ -1733,8 +1756,10 @@ async function renderAlbums() {
           <button class="btn sec" id="scan" title="Ask Jellyfin to rescan">Rescan</button>`) + `
       <h2>${total} albums</h2>
       <div id="alb">${draw()}</div>
-      ${albums.length < total ? '<div style="text-align:center;margin-top:20px"><button class="btn sec" id="more">Load more</button></div>' : ''}`;
+      ${albums.length < total ? '<div style="text-align:center;margin-top:20px"><button class="btn sec" id="more">Load more</button></div>' : ''}
+      <div id="missing"></div>`;
     bindLibHeader(); bindCards($('#alb'), albums, 'jf');
+    renderMissing();
     $('#sort').onchange = (e) => { libSort = e.target.value; try { localStorage.tfSort = libSort; } catch {} renderAlbums(); };
     $('#scan').onclick = async () => { try { await api('/api/library/refresh', { method: 'POST' }); toast('Jellyfin library scan started'); } catch (e) { toast(e.message, true); } };
     const more = $('#more');

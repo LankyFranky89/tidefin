@@ -743,6 +743,26 @@ async function autoTidy() {
 }
 setTimeout(() => autoTidy().catch(() => {}), 60000); // once after start
 
+const missingJob = { running: false, at: 0, done: 0, total: 0, artists: [] };
+async function buildMissing() {
+  missingJob.running = true; missingJob.done = 0; missingJob.artists = [];
+  try {
+    const ix = await getLibIndex(true);
+    const counts = new Map(); for (const [a, , n] of ix.albums) if (a && n >= 3) counts.set(a, (counts.get(a) || 0) + 1);
+    const names = [...counts.keys()].sort((a, b) => a.localeCompare(b));
+    missingJob.total = names.length;
+    for (const n of names) {
+      try {
+        let c = artistAlbumCache.get(n.toLowerCase());
+        if (!c || Date.now() - c.at > 6 * 3600e3) { c = { at: Date.now(), data: await tidalArtistAlbums(n) }; artistAlbumCache.set(n.toLowerCase(), c); }
+        if (c.data.artist && c.data.albums.length) missingJob.artists.push({ name: n, albums: c.data.albums });
+      } catch (e) { console.error('missing:', n, e.message); }
+      missingJob.done++;
+    }
+    missingJob.at = Date.now();
+  } finally { missingJob.running = false; }
+}
+
 // Artists that only exist because of a collab song, and where their songs could go instead
 async function findCollabs() {
   const tr = await jf('/Items?IncludeItemTypes=Audio&Recursive=true&Fields=Path,AlbumArtist&Limit=50000');
@@ -1035,6 +1055,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/cast/wake' && req.method === 'POST') {
       try { await wakeTv(); return send(res, 200, { ok: true }); } catch (e) { return fail(res, 502, e.message); }
+    }
+    if (p === '/api/library/missing') { // Tidal releases by artists you have, built in the background one artist at a time
+      if (!missingJob.running && (!missingJob.at || Date.now() - missingJob.at > 6 * 3600e3 || q.get('fresh'))) buildMissing();
+      return send(res, 200, { running: missingJob.running, done: missingJob.done, total: missingJob.total, artists: missingJob.artists });
     }
     if (p === '/api/tidy/status') return send(res, 200, { pending: tidy.pending, log: tidy.log });
     if (p === '/api/tidy/collabs') return send(res, 200, { songs: await findCollabs() });
