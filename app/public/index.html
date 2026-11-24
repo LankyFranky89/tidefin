@@ -1929,7 +1929,7 @@ function mainArtist(tracks, fallback) {
 }
 async function fanAlbumQueue(al, picked) {
   if (!picked.length) return;
-  const artist = mainArtist(al.tracks, al.artist);
+  let artist = mainArtist(al.tracks, al.artist);
   toast('Looking up the right song names…');
   let m;
   try { m = await api('/api/yt/match', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artist, album: al.title, titles: picked.map((t) => t.title) }) }); }
@@ -1939,9 +1939,10 @@ async function fanAlbumQueue(al, picked) {
     number: cand ? (cand.map[i]?.n || null) : (t.number || i + 1), total: cand ? cand.total : picked.length,
     year: cand ? cand.year : al.year, cover: cand ? cand.cover : (al.cover || t.cover), coverFallback: al.cover || t.cover,
   }));
+  if (m.artist) artist = m.artist;
   if (m.confident) {
     const c = m.candidates[0];
-    toast(`Matched "${c.title}" (${c.year || '?'}) on MusicBrainz`);
+    toast(`Matched "${c.title}" (${c.year || '?'}) on ${c.source || 'MusicBrainz'}`);
     return ytQueue(build(c, picked.map((t, i) => c.map[i]?.title || m.cleaned[i]), c.title, artist));
   }
   const items = await fanReview(m, picked, artist, build);
@@ -1950,9 +1951,9 @@ async function fanAlbumQueue(al, picked) {
 function fanReview(m, picked, artist, build) {
   return new Promise((resolve) => {
     const bgEl = document.createElement('div'); bgEl.className = 'modal-bg';
-    const opts = m.candidates.map((c, i) => `<option value="${i}">${esc(c.title)} · ${esc(c.artist)}${c.year ? ' · ' + c.year : ''} · ${c.total} songs (${Math.round(c.trackScore * 100)}% match)</option>`).join('');
+    const opts = m.candidates.map((c, i) => `<option value="${i}">${esc(c.source || '')}: ${esc(c.title)} · ${esc(c.artist)}${c.year ? ' · ' + c.year : ''} · ${c.total} songs (${Math.round(c.trackScore * 100)}% match)</option>`).join('');
     bgEl.innerHTML = `<div class="modal fanrev" role="dialog" aria-modal="true"><h3>Check song names</h3>
-      <p>${m.candidates.length ? 'Not a sure match on MusicBrainz. Pick the right release, or fix the names yourself.' : 'No match found on MusicBrainz' + (m.error ? ' (' + esc(m.error) + ')' : '') + '. The names below are cleaned up from YouTube; fix anything that\'s wrong.'}</p>
+      <p>${m.candidates.length ? 'Not a sure match. Pick the right release, or fix the names yourself.' : 'No match found on Tidal, Deezer or MusicBrainz' + (m.error ? ' (' + esc(m.error) + ')' : '') + '. The names below are cleaned up from YouTube; fix anything that\'s wrong.'}</p>
       <label class="frl">Release<select id="fr-rel">${opts}<option value="-1">No match, use cleaned YouTube names</option></select></label>
       <div class="frg"><label class="frl">Artist<input id="fr-art"></label><label class="frl">Album<input id="fr-alb"></label></div>
       <div class="frrows">${picked.map((t, i) => `<div class="frrow"><span class="frn" data-frn="${i}"></span><div><input data-frt="${i}"><div class="fryt">YouTube: ${esc(t.title)}</div></div></div>`).join('')}</div>

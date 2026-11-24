@@ -551,34 +551,75 @@ function cleanTitle(t, artist) {
 function cleanAlbum(t, artist) {
   return cleanTitle(String(t || '').replace(/\b(full\s*album|complete\s*album|full\s*ep|album\s*completo)\b/gi, '').replace(/[([]\s*(19|20)\d{2}\s*[)\]]/g, ''), artist);
 }
-async function mbMatch(artist, album, ytTitles) {
-  const alb = cleanAlbum(album, artist);
-  const q = `release:"${alb.replace(/"/g, '')}"` + (artist ? ` AND artist:"${artist.replace(/"/g, '')}"` : '');
-  const s = await mb('release/?limit=10&query=' + encodeURIComponent(q));
-  const rels = (s.releases || []).map((r) => ({ id: r.id, title: r.title, artist: (r['artist-credit'] || []).map((c) => c.name + (c.joinphrase || '')).join(''), year: (r.date || '').slice(0, 4) || null, count: r['track-count'] || 0, score: r.score || 0 }))
-    .filter((r) => sim(r.title, alb) >= 0.5);
-  // prefer releases whose track count matches the upload, then by search score; look at the best 3
-  rels.sort((a, b) => (Math.abs(a.count - ytTitles.length) - Math.abs(b.count - ytTitles.length)) || (b.score - a.score));
-  const cands = [];
-  for (const r of rels.slice(0, 3)) {
-    try {
-      const d = await mb(`release/${r.id}?inc=recordings+artist-credits`);
-      const tracks = []; for (const m of d.media || []) for (const t of m.tracks || []) tracks.push({ n: tracks.length + 1, title: t.title, length: t.length ? Math.round(t.length / 1000) : null });
-      const map = ytTitles.map((yt, i) => {
-        const c = cleanTitle(yt, artist); let best = null, bs = 0;
-        for (const t of tracks) { const v = sim(c, t.title); if (v > bs) { bs = v; best = t; } }
-        if (bs < 0.5 && tracks.length === ytTitles.length) { best = tracks[i]; bs = 0.5; } // same length: fall back to position
-        return best && bs >= 0.5 ? { n: best.n, title: best.title, score: +bs.toFixed(2) } : null;
-      });
-      const matched = map.filter(Boolean);
-      const trackScore = matched.length ? matched.reduce((a, b) => a + b.score, 0) / ytTitles.length : 0;
-      cands.push({ ...r, total: tracks.length, tracks, map, trackScore: +trackScore.toFixed(2), cover: `https://coverartarchive.org/release/${r.id}/front-500` });
-    } catch (e) { console.error('musicbrainz:', e.message); }
+// "Artist - Album [Full Album]" -> {artist, album}; the uploader's name is often not the band
+function splitUpload(title, artistGuess) {
+  const t = String(title || '').replace(/\b(full\s*album|complete\s*album|full\s*ep|album\s*completo|hq|hd)\b/gi, '').replace(/[([]\s*(19|20)\d{2}\s*[)\]]/g, '').replace(/[([]\s*[)\]]/g, '');
+  const m = t.match(/^\s*(.+?)\s+[-–—|:]\s+(.+?)\s*$/);
+  if (m) return { artist: m[1].trim(), album: cleanAlbum(m[2], m[1]) };
+  return { artist: artistGuess || '', album: cleanAlbum(t, artistGuess) };
+}
+function scoreCandidate(c, ytTitles, artist) {
+  const map = ytTitles.map((yt, i) => {
+    const cl = cleanTitle(yt, artist); let best = null, bs = 0;
+    for (const t of c.tracks) { const v = sim(cl, t.title); if (v > bs) { bs = v; best = t; } }
+    if (bs < 0.5 && c.tracks.length === ytTitles.length) { best = c.tracks[i]; bs = 0.5; } // same length: go by position
+    return best && bs >= 0.5 ? { n: best.n, title: best.title, score: +bs.toFixed(2) } : null;
+  });
+  const matched = map.filter(Boolean);
+  return { ...c, total: c.tracks.length, map, trackScore: +(matched.length ? matched.reduce((x, y) => x + y.score, 0) / ytTitles.length : 0).toFixed(2) };
+}
+// Sources, best first: Tidal (exact official tracklists), Deezer (free), MusicBrainz (rare releases)
+async function srcTidal(artist, album) {
+  const r = await tidalSearch(`${artist} ${album}`.trim());
+  const hits = r.albums.filter((a) => sim(a.title, album) >= 0.6 && (!artist || sim(a.artist, artist) >= 0.5)).slice(0, 2);
+  const out = [];
+  for (const h of hits) {
+    const d = await tidalAlbum(h.id);
+    out.push({ source: 'Tidal', id: 'tidal:' + h.id, title: d.title, artist: d.artist, year: d.year, cover: d.cover, tracks: d.tracks.map((t, i) => ({ n: t.number || i + 1, title: t.title })) });
+  }
+  return out;
+}
+async function srcDeezer(artist, album) {
+  const q = artist ? `artist:"${artist}" album:"${album}"` : album;
+  const s = await (await fetch('https://api.deezer.com/search/album?limit=8&q=' + encodeURIComponent(q))).json();
+  const hits = (s.data || []).filter((a) => sim(a.title, album) >= 0.6 && (!artist || sim(a.artist?.name, artist) >= 0.5)).slice(0, 2);
+  const out = [];
+  for (const h of hits) {
+    const d = await (await fetch('https://api.deezer.com/album/' + h.id)).json();
+    out.push({ source: 'Deezer', id: 'deezer:' + h.id, title: d.title, artist: d.artist?.name || h.artist?.name, year: (d.release_date || '').slice(0, 4) || null, cover: d.cover_xl || d.cover_big || null,
+      tracks: ((d.tracks && d.tracks.data) || []).map((t, i) => ({ n: i + 1, title: t.title })) });
+  }
+  return out;
+}
+async function srcMusicBrainz(artist, album, count) {
+  const search = async (q) => (await mb('release/?limit=10&query=' + encodeURIComponent(q))).releases || [];
+  let rels = await search(`release:"${album.replace(/"/g, '')}"` + (artist ? ` AND artist:"${artist.replace(/"/g, '')}"` : ''));
+  if (!rels.length && artist) rels = await search(`release:"${album.replace(/"/g, '')}"`); // artist name may be off
+  const list = rels.map((r) => ({ id: r.id, title: r.title, artist: (r['artist-credit'] || []).map((c) => c.name + (c.joinphrase || '')).join(''), year: (r.date || '').slice(0, 4) || null, count: r['track-count'] || 0, score: r.score || 0 }))
+    .filter((r) => sim(r.title, album) >= 0.5 && (!artist || sim(r.artist, artist) >= 0.4));
+  list.sort((a, b) => (Math.abs(a.count - count) - Math.abs(b.count - count)) || (b.score - a.score));
+  const out = [];
+  for (const r of list.slice(0, 2)) {
+    const d = await mb(`release/${r.id}?inc=recordings+artist-credits`);
+    const tracks = []; for (const m of d.media || []) for (const t of m.tracks || []) tracks.push({ n: tracks.length + 1, title: t.title });
+    out.push({ source: 'MusicBrainz', id: 'mb:' + r.id, title: r.title, artist: r.artist, year: r.year, cover: `https://coverartarchive.org/release/${r.id}/front-500`, tracks });
+  }
+  return out;
+}
+async function mbMatch(artistGuess, uploadTitle, ytTitles) {
+  const { artist, album } = splitUpload(uploadTitle, artistGuess);
+  const cands = [], errors = [];
+  for (const [name, fn] of [['Tidal', () => srcTidal(artist, album)], ['Deezer', () => srcDeezer(artist, album)], ['MusicBrainz', () => srcMusicBrainz(artist, album, ytTitles.length)]]) {
+    try { for (const c of await fn()) cands.push(scoreCandidate(c, ytTitles, artist)); }
+    catch (e) { errors.push(`${name}: ${e.message}`); console.error('match', name, e.message); }
+    const best = cands.reduce((x, y) => (!x || y.trackScore > x.trackScore ? y : x), null);
+    if (best && best.trackScore >= 0.9) break; // good enough, skip slower sources
   }
   cands.sort((a, b) => b.trackScore - a.trackScore);
   const top = cands[0];
-  const confident = !!top && top.trackScore >= 0.8 && Math.abs(top.total - ytTitles.length) <= 1 && new Set(top.map.filter(Boolean).map((m) => m.n)).size === top.map.filter(Boolean).length;
-  return { album: alb, confident, candidates: cands, cleaned: ytTitles.map((t) => cleanTitle(t, artist)) };
+  const okMap = top ? top.map.filter(Boolean) : [];
+  const confident = !!top && top.trackScore >= 0.8 && Math.abs(top.total - ytTitles.length) <= 1 && new Set(okMap.map((m) => m.n)).size === okMap.length;
+  return { artist, album, confident, candidates: cands.slice(0, 6), cleaned: ytTitles.map((t) => cleanTitle(t, artist)), error: !cands.length && errors.length ? errors.join('; ') : undefined };
 }
 
 // Every 15 s: move songs MeTube has finished into Music/Artist/Album and ask Jellyfin to rescan.
