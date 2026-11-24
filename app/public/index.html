@@ -666,6 +666,8 @@ const STATUS_MAP = { queue_download: 'queued', download: 'queued', queue_process
 const dlProg = new Map(); // Tidarr id -> {current,total} songs
 function ringIcon(p) {
   const C = 2 * Math.PI * 15;
+  if (p && p.total > 1 && !p.current) // started, no song finished yet: spin, with the count inside
+    return `<span class="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" class="rt"/><circle cx="18" cy="18" r="15" class="rf rspin" style="stroke-dasharray:24 ${C.toFixed(1)}"/></svg><b>0/${p.total}</b></span>`;
   if (p && p.total > 1) {
     const f = Math.max(0.04, Math.min(1, p.current / p.total));
     return `<span class="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" class="rt"/><circle cx="18" cy="18" r="15" class="rf" style="stroke-dasharray:${(f * C).toFixed(1)} ${C.toFixed(1)}"/></svg><b>${p.current}/${p.total}</b></span>`;
