@@ -629,11 +629,13 @@ function applySettings() {
 // ---------- what's already in the library ----------
 const nkey = (artist, title) => normT(String(artist || '').split(/,|&| feat\.? | ft\.? /i)[0]) + '|' + normT(title);
 function normT(x) { return String(x || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/\(.*?\)|\[.*?\]/g, '').replace(/ - .*(remaster|version|edition|deluxe|live|mix).*$/i, '').replace(/[^a-z0-9]/g, ''); }
+let libArtists = new Map(); // artist you own albums of -> {name, albums}
 let libAlbums = new Map(), libTracks = new Set(), libTrackMap = new Map(); // libAlbums: key -> songs you have
 async function loadLibIndex(fresh) {
   try {
     const r = await api('/api/library/index' + (fresh ? '?fresh=1' : ''));
     libAlbums = new Map(r.albums.map(([a, t, n]) => [nkey(a, t), n || 0]));
+    libArtists = new Map(); for (const [a, , n] of r.albums) if (a && n > 0) { const k = nkey(a, ''); const v = libArtists.get(k) || { name: a, albums: 0 }; v.albums++; libArtists.set(k, v); }
     libTracks = new Set(r.tracks.map(([a, t]) => nkey(a, t)));
     libTrackMap = new Map(r.tracks.filter((x) => x[2]).map(([a, t, id, album, img, dur]) => [nkey(a, t), { id, album, imageId: img, duration: dur }]));
     refreshDlButtons();
@@ -671,6 +673,27 @@ function refreshDlButtons() {
   document.querySelectorAll('[data-ck]').forEach((c) => { c.hidden = dlState.get(c.dataset.ck) !== 'done'; });
   updateNowDl();
 }
+// Collab song ("A, B" or "feat. B"): file it under the artist you already have albums of
+async function collabFileUnder(title, artist) {
+  const names = String(artist || '').split(/\s*(?:,|&|\bx\b|\bfeat\.?|\bft\.?|\bwith\b)\s*/i).concat((String(title || '').match(/\((?:feat\.?|ft\.?|with)\s+([^)]+)\)/i) || [, ''])[1].split(/\s*(?:,|&)\s*/)).map((x) => x.trim()).filter(Boolean);
+  if (names.length < 2) return null;
+  const first = names[0];
+  const owned = [...new Set(names)].map((n) => libArtists.get(nkey(n, ''))).filter(Boolean);
+  if (!owned.length) return null;
+  if (owned.length === 1) return nkey(owned[0].name, '') === nkey(first, '') && artist.split(',').length < 2 ? null : owned[0].name;
+  return pickArtist(title, owned);
+}
+function pickArtist(title, owned) {
+  return new Promise((resolve) => {
+    const bgEl = document.createElement('div'); bgEl.className = 'modal-bg';
+    bgEl.innerHTML = `<div class="modal" role="dialog" aria-modal="true"><h3>File under which artist?</h3><p><b style="color:var(--text)">${esc(title)}</b> is by several artists you have. Pick where it should go in your library.</p>
+      <div class="acts" style="flex-wrap:wrap">${owned.map((o, i) => `<button class="btn${i ? ' sec' : ''}" data-pa="${i}">${esc(o.name)} <span style="opacity:.6">· ${o.albums} album${o.albums === 1 ? '' : 's'}</span></button>`).join('')}</div></div>`;
+    const done = (v) => { bgEl.remove(); resolve(v); };
+    bgEl.onclick = (e) => { if (e.target === bgEl) done(owned[0].name); };
+    bgEl.querySelectorAll('[data-pa]').forEach((b) => b.onclick = () => done(owned[+b.dataset.pa].name));
+    document.body.appendChild(bgEl); bgEl.querySelector('[data-pa]').focus();
+  });
+}
 async function download(type, id, title, artist, skipConfirm) {
   id = String(id);
   if (type === 'album' && S.confirmBig && !skipConfirm && !['queued', 'done'].includes(dlState.get(id))) {
@@ -680,7 +703,9 @@ async function download(type, id, title, artist, skipConfirm) {
   if (dlState.get(id) === 'queued' || dlState.get(id) === 'done') return toast(dlState.get(id) === 'done' ? 'Already downloaded' : 'Already in the queue');
   dlState.set(id, 'queued'); refreshDlButtons();
   try {
-    await api('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, id, title, artist }) });
+    const fileUnder = type === 'track' ? await collabFileUnder(title, artist) : null;
+    await api('/api/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type, id, title, artist, fileUnder }) });
+    if (fileUnder) toast(`Will be filed under ${fileUnder}`);
     toast(`Sent to Tidarr: ${title}`);
     pollQueue(true);
   } catch (e) { dlState.set(id, 'err'); refreshDlButtons(); toast('Download failed: ' + e.message, true); }
@@ -1886,7 +1911,7 @@ function renderYtSection(el, yt, tidal, showAll) {
     e.stopPropagation();
     const t = songs[+b.dataset.ytdl];
     if (['queued', 'done'].includes(ytState.get(t.id))) return toast(ytState.get(t.id) === 'done' ? 'Already in your library' : 'Already downloading');
-    try { await ytQueue([t], true); } catch (err) { toast('YouTube download failed: ' + err.message, true); }
+    try { const fu = await collabFileUnder(t.title, t.artist); await ytQueue([fu ? { ...t, albumArtist: fu } : t], true); } catch (err) { toast('YouTube download failed: ' + err.message, true); }
   });
 }
 // ---------- fan-uploaded albums: fix names with MusicBrainz before downloading ----------

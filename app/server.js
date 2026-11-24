@@ -597,7 +597,7 @@ async function ytSweep() {
     try {
       const src = path.join(METUBE_DIR, it.filename);
       const ext = path.extname(it.filename) || '.m4a';
-      const dir = path.join(MUSIC_DIR, safeName(job.artist.split(',')[0]), safeName(job.album || 'YouTube Music'));
+      const dir = path.join(MUSIC_DIR, safeName((job.albumArtist || job.artist).split(',')[0]), safeName(job.album || 'YouTube Music'));
       fs.mkdirSync(dir, { recursive: true });
       const dest = path.join(dir, (job.number ? String(job.number).padStart(2, '0') + ' ' : '') + safeName(job.title) + ext);
       try { fs.renameSync(src, dest); } catch { fs.copyFileSync(src, dest); fs.unlinkSync(src); } // different disks/shares
@@ -630,6 +630,44 @@ async function tidarrQueue() {
   }));
 }
 
+// ---------- collab songs: file them under the artist you already have ----------
+const RELOC_FILE = path.join(DATA_DIR, 'collab-moves.json');
+let relocs = {}; try { relocs = JSON.parse(fs.readFileSync(RELOC_FILE, 'utf8')); } catch {}
+const saveRelocs = () => { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(RELOC_FILE, JSON.stringify(relocs)); } catch {} };
+function localPath(jfPath) { // Jellyfin's path -> the same file as Tidefin sees it under MUSIC_DIR
+  const parts = String(jfPath || '').split(/[\\/]/).filter(Boolean);
+  for (let k = 0; k < parts.length; k++) { const p = path.join(MUSIC_DIR, ...parts.slice(k)); if (fs.existsSync(p)) return p; }
+  return null;
+}
+const rmIfEmpty = (d) => { try { if (d.startsWith(MUSIC_DIR) && d !== MUSIC_DIR && !fs.readdirSync(d).filter((f) => !/^(cover|folder)\.(jpe?g|png)$/i.test(f)).length) { fs.rmSync(d, { recursive: true }); return true; } } catch {} return false; };
+async function relocate(id) {
+  const r = relocs[id]; if (!r) return true;
+  const j = await jf(`/Items?IncludeItemTypes=Audio&Recursive=true&SearchTerm=${encodeURIComponent(r.title)}&Fields=Path,DateCreated&SortBy=DateCreated&SortOrder=Descending&Limit=40`);
+  const names = r.artist.split(/,\s*/).map(snorm);
+  const it = (j.Items || []).find((i) => snorm(i.Name) === snorm(r.title) && (i.Artists || []).some((a) => names.includes(snorm(a))) && snorm(i.AlbumArtist) !== snorm(r.fileUnder));
+  if (!it) return false;
+  const src = localPath(it.Path); if (!src) return false;
+  if (!(await ensureFfmpeg())) return false;
+  const albumDir = path.dirname(src), artistDir = path.dirname(albumDir);
+  const destDir = path.join(MUSIC_DIR, safeName(r.fileUnder), path.basename(albumDir));
+  fs.mkdirSync(destDir, { recursive: true });
+  const dest = path.join(destDir, path.basename(src));
+  try {
+    await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', src, '-map', '0', '-c', 'copy', '-metadata', `album_artist=${r.fileUnder}`, dest]);
+    for (const f of fs.readdirSync(albumDir)) if (/^(cover|folder)\.(jpe?g|png)$/i.test(f) && !fs.existsSync(path.join(destDir, f))) fs.copyFileSync(path.join(albumDir, f), path.join(destDir, f));
+    fs.unlinkSync(src);
+    if (rmIfEmpty(albumDir)) rmIfEmpty(artistDir);
+    console.log('collab: filed', r.title, 'under', r.fileUnder);
+  } catch (e) { console.error('collab move failed:', e.message); try { fs.unlinkSync(dest); } catch {} return true; }
+  delete relocs[id]; saveRelocs(); jfScanSoon();
+  return true;
+}
+function relocateLater(id) { // Jellyfin needs a moment to see the new file
+  let n = 0; const delays = [15000, 30000, 60000, 120000, 300000];
+  const tick = async () => { let ok = false; try { ok = await relocate(id); } catch (e) { console.error('collab:', e.message); } if (!ok && n < delays.length) setTimeout(tick, delays[n++]); else if (!ok) { delete relocs[id]; saveRelocs(); } };
+  setTimeout(tick, delays[n++]);
+}
+
 // Watch Tidarr: as soon as a download finishes, ask Jellyfin to scan, so it shows up in seconds.
 const tdSeen = new Map(); let tdBusyUntil = 0, scanTimer = null, libVersion = 0;
 function jfScanSoon() {
@@ -646,7 +684,7 @@ async function watchTidarr() {
     let busy = false;
     for (const it of items) {
       const prev = tdSeen.get(it.id);
-      if (it.status === 'finished' && prev && prev !== 'finished') jfScanSoon();
+      if (it.status === 'finished' && prev && prev !== 'finished') { jfScanSoon(); if (relocs[it.id]) relocateLater(it.id); }
       if (it.status !== 'finished' && it.status !== 'error') busy = true;
       tdSeen.set(it.id, it.status);
     }
@@ -993,6 +1031,7 @@ const server = http.createServer(async (req, res) => {
       if (!r.ok && r.status !== 201) return fail(res, 502, `Tidarr refused (${r.status}): ${(await r.text()).slice(0, 200)}`);
       tdBusyUntil = Date.now() + 60000;
       if (type === 'track') { addSingle(b.artist, b.title); libIndexCache = null; }
+      if (type === 'track' && b.fileUnder) { relocs[id] = { title: b.title || '', artist: b.artist || '', fileUnder: String(b.fileUnder), at: Date.now() }; saveRelocs(); }
       return send(res, 200, { ok: true });
     }
     if (p === '/api/queue') return send(res, 200, { items: await tidarrQueue(), libVersion });
