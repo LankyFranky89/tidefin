@@ -434,6 +434,19 @@ html.tv #fs .ib.tvf,html.tv #fs .big.tvf{outline-color:#fff}
 .hrow{scrollbar-width:thin}
 .hrow::-webkit-scrollbar{display:block;height:6px}
 .hrow::-webkit-scrollbar-thumb{border-width:1px}
+
+@keyframes rspin{to{transform:rotate(360deg)}}
+.ring{position:relative;width:100%;height:100%;display:grid;place-items:center}
+.ring svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
+.ring .rt{fill:none;stroke:rgba(255,255,255,.14);stroke-width:3}
+.ring .rf{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round;transition:stroke-dasharray .4s}
+.ring .rspin{animation:rspin 1.2s linear infinite;transform-origin:18px 18px}
+.ring b{position:relative;font-size:9.5px;font-weight:700;color:var(--text);letter-spacing:-.3px;line-height:1}
+.ib.dl.queued{padding:1px}
+.card .ib.dl.queued .ring b{font-size:11px}
+nav button[data-v="downloads"]{position:relative}
+.navring{position:absolute;width:22px;height:22px;top:2px;right:2px;border-radius:50%;background:rgba(10,14,18,.85);pointer-events:none}
+.navring .ring b{font-size:9px}
 </style>
 </head>
 <body>
@@ -629,7 +642,16 @@ function markOwned(list, kind) {
 // ---------- download state (Tidal id -> status) ----------
 const dlState = new Map(); // id -> 'queued' | 'done' | 'err'
 const STATUS_MAP = { queue_download: 'queued', download: 'queued', queue_processing: 'queued', processing: 'queued', finished: 'done', error: 'err' };
-function dlIcon(id) { const s = dlState.get(String(id)); return s === 'queued' ? I.wait : s === 'done' ? I.ok : s === 'err' ? I.err : I.dl; }
+const dlProg = new Map(); // Tidarr id -> {current,total} songs
+function ringIcon(p) {
+  const C = 2 * Math.PI * 15;
+  if (p && p.total > 1) {
+    const f = Math.max(0.04, Math.min(1, p.current / p.total));
+    return `<span class="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" class="rt"/><circle cx="18" cy="18" r="15" class="rf" style="stroke-dasharray:${(f * C).toFixed(1)} ${C.toFixed(1)}"/></svg><b>${p.current}/${p.total}</b></span>`;
+  }
+  return `<span class="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" class="rt"/><circle cx="18" cy="18" r="15" class="rf rspin" style="stroke-dasharray:24 ${C.toFixed(1)}"/></svg>${p && p.label ? `<b>${p.label}</b>` : ''}</span>`;
+}
+function dlIcon(id) { const s = dlState.get(String(id)); return s === 'queued' ? ringIcon(dlProg.get(String(id))) : s === 'done' ? I.ok : s === 'err' ? I.err : I.dl; }
 function dlClass(id) { return 'ib dl ' + (dlState.get(String(id)) || ''); }
 function refreshDlButtons() {
   document.querySelectorAll('[data-dl]').forEach((b) => { const id = b.dataset.dl; b.className = dlClass(id); b.innerHTML = dlIcon(id); });
@@ -650,6 +672,18 @@ async function download(type, id, title, artist, skipConfirm) {
     pollQueue(true);
   } catch (e) { dlState.set(id, 'err'); refreshDlButtons(); toast('Download failed: ' + e.message, true); }
 }
+// ring + songs-left number on the Downloads tab while anything downloads
+function updateDlBadge(items) {
+  const active = items.filter((i) => STATUS_MAP[i.status] === 'queued');
+  let left = 0;
+  for (const i of active) { const p = i.progress && typeof i.progress === 'object' && i.progress.total ? i.progress : null; left += p ? Math.max(0, p.total - p.current) : 1; }
+  document.querySelectorAll('nav button[data-v="downloads"]').forEach((b) => {
+    let r = b.querySelector('.navring');
+    if (!active.length) { if (r) r.remove(); return; }
+    if (!r) { r = document.createElement('span'); r.className = 'navring'; b.prepend(r); }
+    r.innerHTML = ringIcon({ label: left > 99 ? '99+' : String(left) });
+  });
+}
 let queueCache = [], pollTimer = null, seenLibVersion = null, lastDoneAt = 0;
 // Jellyfin picked up new files: refresh what's marked as owned, and the library page you're on
 async function libChanged() {
@@ -665,6 +699,9 @@ async function pollQueue(force) {
     if (libVersion !== undefined && seenLibVersion !== null && libVersion !== seenLibVersion) libChanged();
     if (libVersion !== undefined) seenLibVersion = libVersion;
     let newlyDone = false;
+    dlProg.clear();
+    for (const it of items) if (it.progress && typeof it.progress === 'object' && it.progress.total) dlProg.set(String(it.id), it.progress);
+    updateDlBadge(items);
     for (const it of items) { const s = STATUS_MAP[it.status]; if (s) { if (s === 'done' && dlState.get(String(it.id)) === 'queued') { newlyDone = true; lastDoneAt = Date.now(); } dlState.set(String(it.id), s); } }
     refreshDlButtons();
     if (view.name === 'downloads') renderDownloads();
@@ -1905,8 +1942,8 @@ function renderDownloads() {
   main.innerHTML = `<h2>Tidarr queue <span class="tag">${items.length}</span>
     <span style="margin-left:auto;display:flex;gap:6px"><button class="btn sec" id="rf">Retry failed</button><button class="btn sec" id="cf">Clear finished</button></span></h2>
     ${items.length ? items.map((i) => `<div class="qrow"><div style="min-width:0"><div class="rt" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(i.title || (i.type + ' ' + i.id))}</div><div class="ra" style="color:var(--dim);font-size:13px">${esc(i.artist)} ${i.type ? '· ' + esc(i.type) : ''}</div></div>
-      <span class="st ${esc(i.status)}">${label[i.status] || esc(i.status)}</span>
-      <div class="bar"><i style="width:${i.status === 'finished' ? 100 : (typeof i.progress === 'number' ? Math.min(100, i.progress) : (i.status === 'download' || i.status === 'processing') ? 50 : 0)}%"></i></div></div>`).join('') : '<div class="empty">The queue is empty. Search Tidal and press ↓ on a song or album.</div>'}`;
+      <span class="st ${esc(i.status)}">${label[i.status] || esc(i.status)}${i.progress && i.progress.total > 1 && i.status !== 'finished' ? ` · ${i.progress.current}/${i.progress.total}` : ''}</span>
+      <div class="bar"><i style="width:${i.status === 'finished' ? 100 : (i.progress && i.progress.total ? Math.round(100 * i.progress.current / i.progress.total) : typeof i.progress === 'number' ? Math.min(100, i.progress) : (i.status === 'download' || i.status === 'processing') ? 50 : 0)}%"></i></div></div>`).join('') : '<div class="empty">The queue is empty. Search Tidal and press ↓ on a song or album.</div>'}`;
   $('#rf').onclick = async () => { try { await api('/api/queue/retry', { method: 'POST' }); pollQueue(); } catch (e) { toast(e.message, true); } };
   $('#cf').onclick = async () => { try { await api('/api/queue/clear-finished', { method: 'POST' }); pollQueue(); } catch (e) { toast(e.message, true); } };
 }
