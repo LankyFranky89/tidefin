@@ -107,8 +107,14 @@ async function jf(pathAndQuery, opts = {}) {
 }
 
 const jfFields = 'Fields=PrimaryImageAspectRatio,ProductionYear,ChildCount,RecursiveItemCount,DateCreated,Genres';
+// Collab releases show the full credit ("Antibody & Grendel"); normal albums just the album artist
+const albumCredit = (i) => {
+  const aa = i.AlbumArtist || (i.AlbumArtists?.[0]?.Name) || '';
+  const names = []; for (const n of [...(i.Artists || []), aa]) if (n && !names.some((x) => snorm(x) === snorm(n))) names.push(n);
+  return names.length > 1 && names.length <= 3 ? names.join(' & ') : (aa || names.join(', '));
+};
 const mapJfAlbum = (i) => ({
-  id: i.Id, title: i.Name, artist: i.AlbumArtist || (i.AlbumArtists?.[0]?.Name) || (i.Artists || []).join(', '),
+  id: i.Id, title: i.Name, artist: albumCredit(i),
   year: i.ProductionYear || null, hasImage: !!(i.ImageTags && i.ImageTags.Primary),
   tracks: i.ChildCount || i.RecursiveItemCount || null,
 });
@@ -714,6 +720,29 @@ async function moveTrack(it, fileUnder) {
     return '';
   } catch (e) { console.error('collab move failed:', e.message); try { fs.unlinkSync(dest); } catch {} return e.message; }
 }
+// After each scan: songs with one artist you own are moved quietly; songs with several wait for you to pick
+const TIDY_FILE = path.join(DATA_DIR, 'tidy.json');
+let tidy = { pending: [], log: [] }; try { tidy = { pending: [], log: [], ...JSON.parse(fs.readFileSync(TIDY_FILE, 'utf8')) }; } catch {}
+const saveTidy = () => { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(TIDY_FILE, JSON.stringify(tidy)); } catch {} };
+let tidyBusy = false;
+async function autoTidy() {
+  if (tidyBusy) return; tidyBusy = true;
+  try {
+    const songs = await findCollabs();
+    let moved = 0;
+    const stillPending = [];
+    for (const t of songs) {
+      if (t.options.length === 1) {
+        const j = await jf(`/Items?Ids=${t.id}&Fields=Path`); const it = (j.Items || [])[0];
+        if (it && (await moveTrack(it, t.options[0].name)) === '') { moved++; tidy.log.unshift({ title: t.title, from: t.from, to: t.options[0].name, at: Date.now() }); }
+      } else stillPending.push(t);
+    }
+    tidy.pending = stillPending; tidy.log = tidy.log.slice(0, 20); saveTidy();
+    if (moved) { libIndexCache = null; jfScanSoon(); }
+  } finally { tidyBusy = false; }
+}
+setTimeout(() => autoTidy().catch(() => {}), 60000); // once after start
+
 // Artists that only exist because of a collab song, and where their songs could go instead
 async function findCollabs() {
   const tr = await jf('/Items?IncludeItemTypes=Audio&Recursive=true&Fields=Path,AlbumArtist&Limit=50000');
@@ -750,6 +779,7 @@ function jfScanSoon() {
     try { await jf('/Library/Refresh', { method: 'POST' }); } catch (e) { return console.error('scan:', e.message); }
     // Jellyfin scans in the background; drop our cache a few times while it works
     for (const ms of [4000, 10000, 20000, 40000]) setTimeout(() => { libIndexCache = null; libVersion++; }, ms);
+    setTimeout(() => autoTidy().catch((e) => console.error('auto-tidy:', e.message)), 45000);
   }, 2500); // small wait so several songs finishing together share one scan
 }
 async function watchTidarr() {
@@ -1006,6 +1036,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/cast/wake' && req.method === 'POST') {
       try { await wakeTv(); return send(res, 200, { ok: true }); } catch (e) { return fail(res, 502, e.message); }
     }
+    if (p === '/api/tidy/status') return send(res, 200, { pending: tidy.pending, log: tidy.log });
     if (p === '/api/tidy/collabs') return send(res, 200, { songs: await findCollabs() });
     if (p === '/api/tidy/move' && req.method === 'POST') {
       const b = await readBody(req);
@@ -1018,6 +1049,10 @@ const server = http.createServer(async (req, res) => {
         const r = await moveTrack(it, to);
         if (r === '' || r === 'already there') ok++; else failed.push(`${it.Name}: ${r || 'file not found'}`);
       }
+      const done = new Set(moves.map((x) => String(x.id)));
+      tidy.pending = tidy.pending.filter((t) => !done.has(String(t.id)));
+      for (const x of moves) tidy.log.unshift({ title: x.title || 'Song', to: x.fileUnder, at: Date.now() });
+      tidy.log = tidy.log.slice(0, 20); saveTidy();
       libIndexCache = null; jfScanSoon();
       return send(res, 200, { moved: ok, failed });
     }

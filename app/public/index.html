@@ -2000,7 +2000,7 @@ async function tidyCollabs() {
   bgEl.onclick = (e) => { if (e.target === bgEl) close(); };
   bgEl.querySelector('[data-c="0"]').onclick = close;
   bgEl.querySelector('[data-c="1"]').onclick = async (e) => {
-    const moves = songs.map((t, i) => bgEl.querySelector(`[data-tk="${i}"]`).checked ? { id: t.id, fileUnder: bgEl.querySelector(`[data-tt="${i}"]`).value } : null).filter(Boolean);
+    const moves = songs.map((t, i) => bgEl.querySelector(`[data-tk="${i}"]`).checked ? { id: t.id, title: t.title, fileUnder: bgEl.querySelector(`[data-tt="${i}"]`).value } : null).filter(Boolean);
     if (!moves.length) return close();
     e.target.disabled = true; e.target.textContent = 'Moving…';
     try {
@@ -2105,6 +2105,26 @@ function renderDownloads() {
   $('#rf').onclick = async () => { try { await api('/api/queue/retry', { method: 'POST' }); pollQueue(); } catch (e) { toast(e.message, true); } };
   $('#cf').onclick = async () => { try { await api('/api/queue/clear-finished', { method: 'POST' }); pollQueue(); } catch (e) { toast(e.message, true); } };
   renderYtDownloads();
+  renderTidyBox();
+}
+async function renderTidyBox() {
+  let t; try { t = await api('/api/tidy/status'); } catch { return; }
+  if (view.name !== 'downloads' || (!t.pending.length && !t.log.length)) return;
+  const old = $('#tidybox'); if (old) old.remove();
+  const box = document.createElement('div'); box.id = 'tidybox';
+  box.innerHTML = (t.pending.length ? `<h2 style="margin-top:28px">${t.pending.length} song${t.pending.length === 1 ? ' needs' : 's need'} a home <span class="tag">collab</span></h2>` +
+    t.pending.map((p, i) => `<div class="qrow"><div style="min-width:0"><div class="rt" style="font-weight:600">${esc(p.title)}</div><div class="ra" style="color:var(--dim);font-size:13px">now under ${esc(p.from)}</div></div>
+      <span></span><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">${p.options.map((o, k) => `<button class="btn sec" data-home="${i}:${k}">${esc(o.name)}</button>`).join('')}</div></div>`).join('') : '') +
+    (t.log.length ? `<h2 style="margin-top:28px">Recently tidied</h2>` + t.log.slice(0, 8).map((l) => `<div class="qrow"><div style="min-width:0"><div class="rt">${esc(l.title)}</div><div class="ra" style="color:var(--dim);font-size:13px">${l.from ? esc(l.from) + ' → ' : 'filed under '}${esc(l.to)}</div></div><span></span><span></span></div>`).join('') : '');
+  const dup = $('#tidybox'); if (dup) dup.remove();
+  main.appendChild(box);
+  box.querySelectorAll('[data-home]').forEach((b) => b.onclick = async () => {
+    const [i, k] = b.dataset.home.split(':').map(Number); const p = t.pending[i];
+    b.disabled = true;
+    try { const r = await api('/api/tidy/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moves: [{ id: p.id, fileUnder: p.options[k].name, title: p.title }] }) });
+      toast(r.moved ? `${p.title} filed under ${p.options[k].name}` : 'Move failed: ' + (r.failed[0] || ''), !r.moved); renderTidyBox(); }
+    catch (e) { b.disabled = false; toast(e.message, true); }
+  });
 }
 function renderYtDownloads() {
   if (!S.youtube) return;
