@@ -1204,7 +1204,7 @@ function albumCardsIdx(pairs) {
     </div>`).join('') + '</div>';
 }
 let libTab = 'artists'; // set from Settings → Library opens on
-const LIB_TABS = { artists: 'Artists', albums: 'Albums', songs: 'Songs', genres: 'Genres' };
+const LIB_TABS = { artists: 'Artists', albums: 'Albums', singles: 'Singles', songs: 'Songs', genres: 'Genres' };
 function libHeader(extra = '') {
   return `<div class="ltabs">${Object.entries(LIB_TABS).map(([k, v]) => `<button data-lt="${k}" class="${k === libTab ? 'on' : ''}">${v}</button>`).join('')}<span class="sp">${extra}</span></div>`;
 }
@@ -1219,7 +1219,7 @@ function artistCards(list) {
 }
 function renderLibrary() {
   main.scrollTop = 0;
-  ({ artists: renderArtists, albums: renderAlbums, songs: renderSongs, genres: renderGenres })[libTab]();
+  ({ artists: renderArtists, albums: renderAlbums, singles: renderSingles, songs: renderSongs, genres: renderGenres })[libTab]();
 }
 async function renderArtists() {
   main.innerHTML = libHeader() + '<div class="empty">Loading…</div>'; bindLibHeader();
@@ -1240,6 +1240,19 @@ async function renderArtists() {
 }
 const SONG_SORTS = { title: 'Title', artist: 'Artist', album: 'Album', recent: 'Recently added' };
 let songSort = 'title';
+async function renderSingles() {
+  main.innerHTML = libHeader() + '<div class="empty">Loading…</div>'; bindLibHeader();
+  try {
+    const { tracks } = await api('/api/library/singles');
+    const list = tracks.map((t) => ({ ...t, src: 'jf' }));
+    main.innerHTML = libHeader(list.length ? '<button class="btn sec" id="sgshuf">Shuffle</button>' : '') + `<h2>${list.length} single${list.length === 1 ? '' : 's'}</h2>` +
+      (list.length ? '<div id="sgl"></div>' : '<div class="empty">Songs you download one at a time land here instead of under Albums.</div>');
+    bindLibHeader();
+    if (!list.length) return;
+    $('#sgl').innerHTML = trackRows(list); bindRows($('#sgl'), list);
+    $('#sgshuf').onclick = () => { setShuffle(true); playList(list, Math.floor(Math.random() * list.length)); };
+  } catch (e) { main.innerHTML = libHeader() + errBox(e); bindLibHeader(); }
+}
 async function renderSongs() {
   main.innerHTML = libHeader() + '<div class="empty">Loading…</div>'; bindLibHeader();
   try {
@@ -1756,15 +1769,15 @@ function renderYtSection(el, yt, tidal, showAll) {
     e.stopPropagation();
     const t = songs[+b.dataset.ytdl];
     if (['queued', 'done'].includes(ytState.get(t.id))) return toast(ytState.get(t.id) === 'done' ? 'Already in your library' : 'Already downloading');
-    try { await ytQueue([t]); } catch (err) { toast('YouTube download failed: ' + err.message, true); }
+    try { await ytQueue([t], true); } catch (err) { toast('YouTube download failed: ' + err.message, true); }
   });
 }
-async function ytQueue(items) {
+async function ytQueue(items, single) {
   items = items.filter((t) => !['queued', 'done'].includes(ytState.get(t.id)));
   if (!items.length) return toast('Already in your library or downloading');
   items.forEach((t) => ytState.set(t.id, 'queued')); refreshYtButtons();
   try {
-    await api('/api/yt/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: items.map((t) => ({ id: t.id, title: t.title, artist: t.artist, album: t.album, number: t.number })) }) });
+    await api('/api/yt/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ single: !!single, items: items.map((t) => ({ id: t.id, title: t.title, artist: t.artist, album: t.album, number: t.number })) }) });
     toast(items.length === 1 ? `Downloading from YouTube Music: ${items[0].title}` : `Downloading ${items.length} songs from YouTube Music`);
     pollYt();
   } catch (err) { items.forEach((t) => ytState.set(t.id, 'error')); refreshYtButtons(); throw err; }

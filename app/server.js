@@ -116,6 +116,43 @@ const mapJfArtist = (i) => ({ id: i.Id, name: i.Name, hasImage: !!(i.ImageTags &
 // A Jellyfin user is needed for per-user data such as play counts (top songs).
 let jfUserId = null;
 let libIndexCache = null;
+// Songs downloaded one at a time ("singles"). Albums that hold only such songs stay out of Albums.
+const SINGLES_FILE = '/app/data/singles.json';
+const snorm = (x) => String(x || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^a-z0-9]/g, '');
+const skey = (artist, title) => snorm(artist) + '|' + snorm(title);
+let singles = [];
+try { singles = JSON.parse(fs.readFileSync(SINGLES_FILE, 'utf8')); } catch {}
+let singleKeys = new Set(singles.map((x) => skey(x.artist, x.title)));
+function addSingle(artist, title) {
+  if (!title) return;
+  const k = skey(artist, title);
+  if (singleKeys.has(k)) return;
+  singles.push({ artist: artist || '', title, at: Date.now() }); singleKeys.add(k);
+  try { fs.mkdirSync('/app/data', { recursive: true }); fs.writeFileSync(SINGLES_FILE, JSON.stringify(singles)); } catch (e) { console.error('singles save:', e.message); }
+}
+async function getLibIndex(fresh) {
+  if (!libIndexCache || Date.now() - libIndexCache.at > 60000 || fresh) {
+    const [al, tr] = await Promise.all([
+      jf('/Items?IncludeItemTypes=MusicAlbum&Recursive=true&Fields=AlbumArtist&EnableImages=false&Limit=20000'),
+      jf('/Items?IncludeItemTypes=Audio&Recursive=true&Fields=AlbumArtist&Limit=50000'),
+    ]);
+    const per = new Map(), allSingle = new Map();
+    for (const t of tr.Items || []) {
+      if (!t.AlbumId) continue;
+      per.set(t.AlbumId, (per.get(t.AlbumId) || 0) + 1);
+      const isS = singleKeys.has(skey((t.Artists || [])[0] || t.AlbumArtist, t.Name)) || singleKeys.has(skey(t.AlbumArtist, t.Name));
+      allSingle.set(t.AlbumId, (allSingle.get(t.AlbumId) ?? true) && isS);
+    }
+    libIndexCache = {
+      at: Date.now(),
+      loose: [...allSingle].filter(([, v]) => v).map(([k]) => k),
+      albums: (al.Items || []).map((i) => [i.AlbumArtist || (i.Artists || [])[0] || '', i.Name, per.get(i.Id) || 0]),
+      tracks: (tr.Items || []).map((i) => [(i.Artists || [])[0] || i.AlbumArtist || '', i.Name, i.Id, i.Album || '', (i.ImageTags && i.ImageTags.Primary) ? i.Id : (i.AlbumPrimaryImageTag ? i.AlbumId : null), i.RunTimeTicks ? Math.round(i.RunTimeTicks / 1e7) : null]),
+    };
+  }
+  return libIndexCache;
+}
+const looseExclude = async () => { const l = (await getLibIndex().catch(() => ({ loose: [] }))).loose; return l.length ? '&ExcludeItemIds=' + l.join(',') : ''; };
 const lyricsCache = new Map();
 const artistAlbumCache = new Map(); // artist name -> {at, data}
 const previewCache = new Map(); // tidal id -> preview url (or null)
@@ -521,7 +558,7 @@ const server = http.createServer(async (req, res) => {
         year: 'SortBy=ProductionYear,SortName&SortOrder=Descending',
       };
       const sort = SORTS[q.get('sort')] || SORTS.recent;
-      const j = await jf(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&${sort}&StartIndex=${start}&Limit=60&${jfFields}`);
+      const j = await jf(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&${sort}&StartIndex=${start}&Limit=60&${jfFields}${await looseExclude()}`);
       return send(res, 200, { total: j.TotalRecordCount || 0, albums: (j.Items || []).map(mapJfAlbum) });
     }
     let m;
@@ -582,6 +619,7 @@ const server = http.createServer(async (req, res) => {
         n++;
       }
       if (!n) return fail(res, 400, 'Missing video id');
+      if (b.single && n === 1) { const it = items[0]; addSingle(it.artist, it.title); libIndexCache = null; }
       return send(res, 200, { ok: true, queued: n });
     }
     if (p === '/api/yt/status') {
@@ -640,23 +678,14 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/library/index') {
       // Compact list of what's in the library, so the UI can mark Tidal items you already have.
-      if (!libIndexCache || Date.now() - libIndexCache.at > 60000 || q.get('fresh')) {
-        const [al, tr] = await Promise.all([
-          jf('/Items?IncludeItemTypes=MusicAlbum&Recursive=true&Fields=AlbumArtist&EnableImages=false&Limit=20000'),
-          jf('/Items?IncludeItemTypes=Audio&Recursive=true&Fields=AlbumArtist&Limit=50000'),
-        ]);
-        libIndexCache = {
-          at: Date.now(),
-          albums: (() => {
-            // how many songs of each album you actually have (one downloaded song != whole album)
-            const per = new Map();
-            for (const t of tr.Items || []) if (t.AlbumId) per.set(t.AlbumId, (per.get(t.AlbumId) || 0) + 1);
-            return (al.Items || []).map((i) => [i.AlbumArtist || (i.Artists || [])[0] || '', i.Name, per.get(i.Id) || 0]);
-          })(),
-          tracks: (tr.Items || []).map((i) => [(i.Artists || [])[0] || i.AlbumArtist || '', i.Name, i.Id, i.Album || '', (i.ImageTags && i.ImageTags.Primary) ? i.Id : (i.AlbumPrimaryImageTag ? i.AlbumId : null), i.RunTimeTicks ? Math.round(i.RunTimeTicks / 1e7) : null]),
-        };
-      }
-      return send(res, 200, { albums: libIndexCache.albums, tracks: libIndexCache.tracks });
+      const ix = await getLibIndex(q.get('fresh'));
+      return send(res, 200, { albums: ix.albums, tracks: ix.tracks });
+    }
+    if (p === '/api/library/singles') {
+      const ix = await getLibIndex(q.get('fresh'));
+      if (!ix.loose.length) return send(res, 200, { tracks: [] });
+      const j = await jf(`/Items?IncludeItemTypes=Audio&Recursive=true&AlbumIds=${ix.loose.join(',')}&SortBy=DateCreated,SortName&SortOrder=Descending&Limit=2000`);
+      return send(res, 200, { tracks: (j.Items || []).map(mapJfTrack) });
     }
     if (p === '/api/library/artists') {
       const start = parseInt(q.get('start') || '0', 10) || 0;
@@ -668,7 +697,7 @@ const server = http.createServer(async (req, res) => {
       const uid = await jfUser().catch(() => null);
       const [info, albums, top] = await Promise.all([
         jf(`/Items?Ids=${id}&Fields=Overview,Genres`),
-        jf(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&AlbumArtistIds=${id}&SortBy=ProductionYear,PremiereDate,SortName&SortOrder=Descending&${jfFields}`),
+        jf(`/Items?IncludeItemTypes=MusicAlbum&Recursive=true&AlbumArtistIds=${id}&SortBy=ProductionYear,PremiereDate,SortName&SortOrder=Descending&${jfFields}${await looseExclude()}`),
         uid ? jf(`/Users/${uid}/Items?IncludeItemTypes=Audio&Recursive=true&ArtistIds=${id}&SortBy=PlayCount,SortName&SortOrder=Descending&Limit=10&Fields=UserData`).catch(() => ({ Items: [] })) : { Items: [] },
       ]);
       const a = (info.Items || [])[0];
@@ -813,6 +842,7 @@ const server = http.createServer(async (req, res) => {
         body: JSON.stringify({ item: { id, url: `https://listen.tidal.com/${type}/${id}`, type, status: 'queue_download', title: b.title || '', artist: b.artist || '' } }),
       });
       if (!r.ok && r.status !== 201) return fail(res, 502, `Tidarr refused (${r.status}): ${(await r.text()).slice(0, 200)}`);
+      if (type === 'track') { addSingle(b.artist, b.title); libIndexCache = null; }
       return send(res, 200, { ok: true });
     }
     if (p === '/api/queue') return send(res, 200, { items: await tidarrQueue() });
