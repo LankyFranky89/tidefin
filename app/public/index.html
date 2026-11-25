@@ -689,7 +689,8 @@ function ringIcon(p) {
   }
   return `<span class="ring"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" class="rt"/><circle cx="18" cy="18" r="15" class="rf rspin" style="stroke-dasharray:24 ${C.toFixed(1)}"/></svg>${p && p.label ? `<b>${p.label}</b>` : ''}</span>`;
 }
-function dlIcon(id) { const s = dlState.get(String(id)); return s === 'queued' ? ringIcon(dlProg.get(String(id))) : s === 'done' ? I.ok : s === 'err' ? I.err : I.dl; }
+const dlTotal = new Map(); // album id -> number of songs, so the ring can show 0/N before Tidarr reports
+function dlIcon(id) { const s = dlState.get(String(id)); return s === 'queued' ? ringIcon(dlProg.get(String(id)) || (dlTotal.get(String(id)) ? { current: 0, total: dlTotal.get(String(id)) } : null)) : s === 'done' ? I.ok : s === 'err' ? I.err : I.dl; }
 function dlClass(id) { return 'ib dl ' + (dlState.get(String(id)) || ''); }
 function refreshDlButtons() {
   document.querySelectorAll('[data-dl]').forEach((b) => { const id = b.dataset.dl; b.className = dlClass(id); b.innerHTML = dlIcon(id); });
@@ -1248,7 +1249,7 @@ function bindRows(el, list) {
 }
 function albumCards(list, src, row = false) {
   if (!list.length) return '<div class="empty">No albums</div>';
-  if (src === 'tidal') markOwned(list, 'album');
+  if (src === 'tidal') { markOwned(list, 'album'); for (const a of list) if (a.tracks > 1) dlTotal.set(String(a.id), a.tracks); }
   return `<div class="${row ? 'hrow' : 'grid'}">` + list.map((a, i) => {
     const id = esc(a.id), done = src === 'tidal' && dlState.get(String(a.id)) === 'done';
     return `
