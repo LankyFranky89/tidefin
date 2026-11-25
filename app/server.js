@@ -114,7 +114,7 @@ const albumCredit = (i) => {
   return names.length > 1 && names.length <= 3 ? names.join(' & ') : (aa || names.join(', '));
 };
 const mapJfAlbum = (i) => ({
-  id: i.Id, title: i.Name, artist: albumCredit(i),
+  id: i.Id, title: i.Name, artist: albumCredit(i), quality: libIndexCache && libIndexCache.albumQ ? libIndexCache.albumQ.get(i.Id) ?? null : null,
   year: i.ProductionYear || null, hasImage: !!(i.ImageTags && i.ImageTags.Primary),
   tracks: i.ChildCount || i.RecursiveItemCount || null,
 });
@@ -141,7 +141,7 @@ async function getLibIndex(fresh) {
   if (!libIndexCache || Date.now() - libIndexCache.at > 60000 || fresh) {
     const [al, tr] = await Promise.all([
       jf('/Items?IncludeItemTypes=MusicAlbum&Recursive=true&Fields=AlbumArtist&EnableImages=false&Limit=20000'),
-      jf('/Items?IncludeItemTypes=Audio&Recursive=true&Fields=AlbumArtist&Limit=50000'),
+      jf('/Items?IncludeItemTypes=Audio&Recursive=true&Fields=AlbumArtist,MediaStreams&Limit=50000'),
     ]);
     const per = new Map(), allSingle = new Map();
     for (const t of tr.Items || []) {
@@ -150,11 +150,14 @@ async function getLibIndex(fresh) {
       const isS = singleKeys.has(skey((t.Artists || [])[0] || t.AlbumArtist, t.Name)) || singleKeys.has(skey(t.AlbumArtist, t.Name));
       allSingle.set(t.AlbumId, (allSingle.get(t.AlbumId) ?? true) && isS);
     }
+    const albumQ = new Map();
+    for (const t of tr.Items || []) { const qv = trackQuality(t); if (qv === null || !t.AlbumId) continue; const o = albumQ.get(t.AlbumId); if (o === undefined || qv < o) albumQ.set(t.AlbumId, qv); }
     const aaSongs = new Map(), aaAlb = new Map();
     for (const t of tr.Items || []) { const k = snorm(t.AlbumArtist); if (!k) continue; aaSongs.set(k, (aaSongs.get(k) || 0) + 1); const ak = k + '|' + t.AlbumId; aaAlb.set(ak, (aaAlb.get(ak) || 0) + 1); }
     const realAA = new Set([...aaAlb].filter(([, n]) => n >= 3).map(([k]) => k.split('|')[0]));
     libIndexCache = {
       at: Date.now(),
+      albumQ,
       smallArtists: new Set([...aaSongs].filter(([k, n]) => n <= 2 && !realAA.has(k)).map(([k]) => k)),
       loose: [...allSingle].filter(([, v]) => v).map(([k]) => k),
       albums: (al.Items || []).map((i) => [i.AlbumArtist || (i.Artists || [])[0] || '', i.Name, per.get(i.Id) || 0]),
@@ -286,7 +289,7 @@ async function tidalSearch(q) {
   });
   const albums = order(albumIds, aDoc.data || []).map((a) => ({
     id: a.id, title: a.attributes?.title, artist: artistNames(aMap, a),
-    year: (a.attributes?.releaseDate || '').slice(0, 4) || null, cover: pickCover(aMap, a),
+    year: (a.attributes?.releaseDate || '').slice(0, 4) || null, cover: pickCover(aMap, a), quality: tidalQuality(a),
     tracks: a.attributes?.numberOfItems || null,
   }));
   return { tracks, albums };
@@ -330,7 +333,7 @@ async function tidalArtistAlbums(name) {
     const m = indexIncluded(doc);
     for (const a of doc.data || []) {
       albums.push({
-        id: a.id, title: a.attributes?.title, artist: artistNames(m, a), type: a.attributes?.albumType || 'ALBUM',
+        id: a.id, title: a.attributes?.title, artist: artistNames(m, a), type: a.attributes?.albumType || 'ALBUM', quality: tidalQuality(a),
         year: (a.attributes?.releaseDate || '').slice(0, 4) || null, date: a.attributes?.releaseDate || '',
         cover: pickCover(m, a), tracks: a.attributes?.numberOfItems || null, explicit: !!a.attributes?.explicit,
       });
@@ -342,6 +345,15 @@ async function tidalArtistAlbums(name) {
   return { artist: { id: artist.id, name: artist.attributes?.name }, albums: [...seen.values()].sort((a, b) => (b.date || '').localeCompare(a.date || '')) };
 }
 
+// 0 = lossy, 1 = FLAC (CD), 2 = Hi-Res
+const tidalQuality = (a) => { const t = (a && a.attributes && a.attributes.mediaTags) || []; return t.includes('HIRES_LOSSLESS') ? 2 : 1; };
+const LOSSLESS = /^(flac|alac|wav|pcm|aiff|ape|wavpack|wv|dsd)/i;
+function trackQuality(i) {
+  const st = ((i.MediaStreams || (i.MediaSources && i.MediaSources[0] && i.MediaSources[0].MediaStreams)) || []).find((x) => x.Type === 'Audio');
+  if (!st) return null;
+  if (!LOSSLESS.test(st.Codec || '')) return 0;
+  return (st.BitDepth || 16) > 16 || (st.SampleRate || 44100) > 48000 ? 2 : 1;
+}
 async function tidalAlbum(id) {
   const aDoc = await tidalByIds('albums', [id], ['artists', 'coverArt'], ['artists']);
   const aMap = indexIncluded(aDoc);
@@ -376,6 +388,7 @@ async function tidalAlbum(id) {
   return {
     id, title: a?.attributes?.title || '', artist: a ? artistNames(aMap, a) : '',
     year: (a?.attributes?.releaseDate || '').slice(0, 4) || null, cover: a ? pickCover(aMap, a, 640) : null, tracks,
+    quality: tidalQuality(a),
   };
 }
 
@@ -791,6 +804,19 @@ function relocateLater(id) { // Jellyfin needs a moment to see the new file
   setTimeout(tick, delays[n++]);
 }
 
+// Quality upgrades waiting for Tidarr: keep the old copy until the new one is in place
+const UPG_FILE = path.join(DATA_DIR, 'upgrades.json');
+let upgrades = {}; try { upgrades = JSON.parse(fs.readFileSync(UPG_FILE, 'utf8')); } catch {}
+const saveUpgrades = () => { try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(UPG_FILE, JSON.stringify(upgrades)); } catch {} };
+function finishUpgrade(id, ok) {
+  const u = upgrades[id]; if (!u) return;
+  const dirs = [...new Set(u.moved.map((x) => path.dirname(x.from)))];
+  const hasNew = dirs.some((d) => { try { return fs.readdirSync(d).some((f) => /\.(flac|m4a|mp3|ogg|opus|wav|aiff?)$/i.test(f)); } catch { return false; } });
+  if (ok && hasNew) { try { fs.rmSync(u.backup, { recursive: true, force: true }); } catch {} console.log('upgrade done:', u.title); }
+  else { for (const x of u.moved) { try { fs.mkdirSync(path.dirname(x.from), { recursive: true }); if (!fs.existsSync(x.from)) fs.renameSync(x.to, x.from); } catch {} } try { fs.rmSync(u.backup, { recursive: true, force: true }); } catch {} console.log('upgrade failed, old files restored:', u.title); }
+  delete upgrades[id]; saveUpgrades(); jfScanSoon();
+}
+
 // Watch Tidarr: as soon as a download finishes, ask Jellyfin to scan, so it shows up in seconds.
 const tdSeen = new Map(); let tdBusyUntil = 0, scanTimer = null, libVersion = 0;
 function jfScanSoon() {
@@ -809,6 +835,7 @@ async function watchTidarr() {
     for (const it of items) {
       const prev = tdSeen.get(it.id);
       if (it.status === 'finished' && prev && prev !== 'finished') { jfScanSoon(); if (relocs[it.id]) relocateLater(it.id); }
+      if (upgrades[it.id] && (it.status === 'finished' || it.status === 'error') && prev !== it.status) { const ok = it.status === 'finished'; setTimeout(() => finishUpgrade(it.id, ok), 5000); }
       if (it.status !== 'finished' && it.status !== 'error') busy = true;
       tdSeen.set(it.id, it.status);
     }
@@ -817,6 +844,7 @@ async function watchTidarr() {
   setTimeout(watchTidarr, Date.now() < tdBusyUntil ? 3000 : 20000);
 }
 setTimeout(watchTidarr, 3000);
+setInterval(() => { for (const [id, u] of Object.entries(upgrades)) if (Date.now() - u.at > 3 * 3600e3) finishUpgrade(id, true); }, 10 * 60e3); // stuck upgrades: keep new if it arrived, else restore
 
 // ---------- Cast to TV: the Tidefin TV app checks in here and takes commands from your phone/PC ----------
 const castDevices = new Map(); // id -> {name, seen, state, cmds, ip}
@@ -964,7 +992,8 @@ const server = http.createServer(async (req, res) => {
       ]);
       const a = (info.Items || [])[0];
       if (!a) return fail(res, 404, 'Album not found');
-      return send(res, 200, { ...mapJfAlbum(a), artistId: (a.AlbumArtists && a.AlbumArtists[0] && a.AlbumArtists[0].Id) || null, tracks: (tr.Items || []).map(mapJfTrack) });
+      const qs = (tr.Items || []).map(trackQuality).filter((x) => x !== null);
+      return send(res, 200, { ...mapJfAlbum(a), quality: qs.length ? Math.min(...qs) : null, upgrading: Object.values(upgrades).some((u) => u.albumId === m[1]), artistId: (a.AlbumArtists && a.AlbumArtists[0] && a.AlbumArtists[0].Id) || null, tracks: (tr.Items || []).map(mapJfTrack) });
     }
     if (p === '/api/library/delete' && req.method === 'POST') {
       // Permanently deletes media files through Jellyfin. type: song | album | artist
@@ -1307,6 +1336,25 @@ const server = http.createServer(async (req, res) => {
       tdBusyUntil = Date.now() + 60000;
       if (type === 'track') { addSingle(b.artist, b.title); libIndexCache = null; }
       if (type === 'track' && b.fileUnder) { relocs[id] = { title: b.title || '', artist: b.artist || '', fileUnder: String(b.fileUnder), at: Date.now() }; saveRelocs(); }
+      return send(res, 200, { ok: true });
+    }
+    if (p === '/api/upgrade' && req.method === 'POST') { // replace your copy with Tidal's better version
+      const b = await readBody(req);
+      const albumId = String(b.albumId || '').replace(/[^\w-]/g, ''), tid = String(b.tidalId || '').replace(/\D/g, '');
+      if (!albumId || !tid) return fail(res, 400, 'Missing album');
+      const tr = await jf(`/Items?ParentId=${albumId}&IncludeItemTypes=Audio&Recursive=true&Fields=Path`);
+      const files = (tr.Items || []).map((i) => localPath(i.Path)).filter(Boolean);
+      if (!files.length) return fail(res, 404, 'Couldn\'t find the album\'s files on the NAS');
+      // move the old files aside first (Tidarr skips files that already exist); they come back if the download fails
+      const backup = path.join(MUSIC_DIR, '.tidefin-old', albumId);
+      fs.mkdirSync(backup, { recursive: true });
+      const moved = [];
+      try { files.forEach((f, k) => { const to = path.join(backup, k + '_' + path.basename(f)); fs.renameSync(f, to); moved.push({ from: f, to }); }); }
+      catch (e) { for (const x of moved) try { fs.renameSync(x.to, x.from); } catch {} return fail(res, 500, 'Couldn\'t move the old files: ' + e.message); }
+      const r = await tidarr('/api/save', { method: 'POST', body: JSON.stringify({ item: { id: tid, url: `https://listen.tidal.com/album/${tid}`, type: 'album', status: 'queue_download', title: b.title || '', artist: b.artist || '' } }) });
+      if (!r.ok && r.status !== 201) { for (const x of moved) try { fs.renameSync(x.to, x.from); } catch {} return fail(res, 502, `Tidarr refused (${r.status})`); }
+      upgrades[tid] = { albumId, backup, moved, at: Date.now(), title: b.title || '' }; saveUpgrades();
+      tdBusyUntil = Date.now() + 60000; jfScanSoon();
       return send(res, 200, { ok: true });
     }
     if (p === '/api/queue') return send(res, 200, { items: await tidarrQueue(), libVersion });

@@ -482,6 +482,8 @@ html.tv #fs-seek.tvf{outline:3px solid var(--accent);outline-offset:8px;border-r
 .ring svg{width:100%!important;height:100%!important;position:absolute!important;inset:0}
 .card .tt .ib.dl.queued{width:34px;height:34px}
 .card .ib.dl.queued .ring b{font-size:10px}
+.badge.qb{left:auto;right:8px;top:8px;letter-spacing:.04em}
+.badge.q2{color:#f5c542}.badge.q1{color:#7fe9d4}.badge.q0{color:#ff9b7a}
 </style>
 </head>
 <body>
@@ -1258,7 +1260,7 @@ function albumCards(list, src, row = false) {
     return `
     <div class="card" data-alb="${i}">
       <div class="art" style="background-image:${src === 'tidal' ? bg(a.cover) : (a.hasImage ? jfImg(a.id) : 'none')}">
-        ${src === 'tidal' ? `<span class="badge">TIDAL</span><span class="ck" data-ck="${id}"${done ? '' : ' hidden'}>${ICK}</span>` : ''}
+        ${src === 'tidal' ? `<span class="badge">TIDAL</span><span class="ck" data-ck="${id}"${done ? '' : ' hidden'}>${ICK}</span>` : qBadge(a)}
         <button class="pl" data-pla="${i}" title="Play album">${I.play}</button>
       </div>
       <div class="tt"><div><div class="t">${esc(a.title)}</div><div class="a">${esc(a.artist)}${a.year ? ' · ' + a.year : ''}${done ? ' · In library' : ''}</div></div>
@@ -1327,10 +1329,12 @@ function artistGroups(albums) {
   albums.forEach((a, i) => { const k = a.artist || ''; if (k !== cur) { flush(); cur = k; } buf.push([a, i]); });
   flush(); return html;
 }
+const Q_LABEL = ['LOSSY', 'FLAC', 'HI-RES'];
+const qBadge = (a) => a.quality === 0 || a.quality === 1 || a.quality === 2 ? `<span class="badge qb q${a.quality}">${Q_LABEL[a.quality]}</span>` : '';
 function albumCardsIdx(pairs) {
   return '<div class="grid">' + pairs.map(([a, i]) => `
     <div class="card" data-alb="${i}">
-      <div class="art" style="background-image:${a.hasImage ? jfImg(a.id) : 'none'}"></div>
+      <div class="art" style="background-image:${a.hasImage ? jfImg(a.id) : 'none'}">${qBadge(a)}</div>
       <div class="t">${esc(a.title)}</div><div class="a">${a.year || ''}</div>
     </div>`).join('') + '</div>';
 }
@@ -1825,6 +1829,24 @@ function bindTidalMore(box, r) {
   if (a) bindCards(a, r.albums, 'tidal');
   if (sg) bindCards(sg, r.small, 'tidal');
 }
+// Album page: offer Tidal's better version of an album you have in lower quality
+async function offerUpgrade(a, count) {
+  const vid = view.id;
+  let r; try { r = await api(`/api/tidal/search?q=${encodeURIComponent(a.artist.split(' & ')[0] + ' ' + a.title)}`); } catch { return; }
+  if (view.name !== 'album' || view.id !== vid) return;
+  const best = (r.albums || []).filter((x) => normTitle(x.title) === normTitle(a.title) && nkey(x.artist.split(',')[0], '') === nkey(a.artist.split(' & ')[0], '') && (x.quality ?? 1) > a.quality)
+    .sort((x, y) => (y.quality - x.quality) || Math.abs((x.tracks || count) - count) - Math.abs((y.tracks || count) - count))[0];
+  const box = $('#aupg'); if (!best || !box) return;
+  box.innerHTML = `<button class="btn sec" id="upg">Upgrade to ${Q_LABEL[best.quality ?? 1] === 'HI-RES' ? 'Hi-Res' : 'FLAC'} from Tidal</button>`;
+  $('#upg').onclick = async () => {
+    const ok = await confirmBoxPlain(`Upgrade "${a.title}"?`, `Downloads Tidal's ${best.quality === 2 ? 'Hi-Res' : 'FLAC'} version. Your current copy is kept aside and deleted once the new one is in place, or put back if the download fails.`, 'Upgrade');
+    if (!ok) return;
+    try {
+      await api('/api/upgrade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ albumId: a.id, tidalId: best.id, title: a.title, artist: a.artist }) });
+      box.innerHTML = '<span class="tag">Upgrading from Tidal…</span>'; toast('Upgrade started'); pollQueue();
+    } catch (e) { toast(e.message, true); }
+  };
+}
 // Album page: other albums by the same artist (yours, then the ones on Tidal you don't have)
 async function moreByArtist(a) {
   const vid = view.id, still = () => view.name === 'album' && view.id === vid;
@@ -1857,13 +1879,14 @@ async function renderAlbum() {
     main.innerHTML = `${backBtn()}
       <div class="hero"><div class="art" style="background-image:${a.hasImage ? jfImg(a.id, 500) : 'none'}"></div>
       <div><div class="meta">Album · In your library</div><h1>${esc(a.title)}</h1><div class="meta">${esc(a.artist)}${a.year ? ' · ' + a.year : ''} · ${list.length} tracks</div>
-      <div class="acts"><button class="btn" id="pa">${I.play.replace('<svg', '<svg width="16"')} Play</button><button class="ib more" id="amenu" title="More">${IMORE}</button></div></div></div>
+      <div class="acts"><button class="btn" id="pa">${I.play.replace('<svg', '<svg width="16"')} Play</button><button class="ib more" id="amenu" title="More">${IMORE}</button><span id="aupg">${a.upgrading ? '<span class="tag">Upgrading from Tidal…</span>' : ''}</span></div></div></div>
       <div id="tr">${trackRows(list, { showThumb: false, numbered: true })}</div>
       <div id="amore"></div><div id="amtidal"></div>`;
     $('#amenu').onclick = (e) => { e.stopPropagation(); openMenu($('#amenu'), [{ label: 'Delete album', danger: true, icon: ITRASH, run: () => deleteItem('album', a, () => { history_.length ? $('#back').click() : go('library', {}, false); }) }]); };
     bindBack(); bindRows($('#tr'), list);
     $('#pa').onclick = () => list.length && playList(list, 0);
     moreByArtist(a);
+    if (!a.upgrading && (a.quality === 0 || a.quality === 1)) offerUpgrade(a, list.length);
   } catch (e) { main.innerHTML = backBtn() + errBox(e); bindBack(); }
 }
 
